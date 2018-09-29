@@ -17,26 +17,14 @@
  *  limitations under the License.
  */
 
-#ifndef CHUNKIO_H
-#define CHUNKIO_H
+#ifndef CIO_DEBUG_H
+#define CIO_DEBUG_H
 
-/* debug levels */
-#define CIO_ERROR  1
-#define CIO_WARN   2
-#define CIO_INFO   3
-#define CIO_DEBUG  4
+#define CIO_DEBUG_BUF_SIZE  256
 
-struct cio_ctx {
-    char *root_path;
-    int log_level;
-    void (*log_cb)(void *, const char *, int, const char *);
-};
-
-struct cio_ctx *cio_create(const char *root_path);
-void cio_destroy(struct cio_ctx *ctx);
-
-int cio_set_debug_callback(struct cio_ctx *ctx, void (*log_cb));
-int cio_set_debug_level(struct cio_ctx *ctx, int level);
-void cio_debug_test(void *ctx);
+void cio_debug_print(void *ctx, int level, const char *file, int line,
+                     const char *fmt, ...);
+#define CIO_DEBUG_MSG(ctx, level, fmt, ...)                             \
+  cio_debug_print(ctx, level, __FILENAME__, __LINE__, fmt, ##__VA_ARGS__)
 
 #endif

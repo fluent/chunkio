@@ -27,11 +27,17 @@
 
 static void cio_help(int rc)
 {
-    printf("Usage: cio [OPTION]\n\n");
+    printf("Usage: cio -r PATH\n\n");
     printf("Available Options\n");
     printf("  -r, --root[=PATH]\tset root path\n");
     printf("  -h, --help\t\tprint this help\n");
     exit(rc);
+}
+
+static int debug_cb(struct cio_ctx *ctx, const char *file, int line,
+                    char *str)
+{
+    printf("[chunkio] %s:%i: %s", file, line, str);
 }
 
 int main(int argc, char **argv)
@@ -63,11 +69,15 @@ int main(int argc, char **argv)
 
     if (!root_path) {
         fprintf(stderr, "[chunkio cli] root path is not defined\n");
-        exit(EXIT_FAILURE);
+        cio_help(EXIT_FAILURE);
     }
 
     ctx = cio_create(root_path);
     free(root_path);
+
+    cio_set_debug_callback(ctx, debug_cb);
+    cio_set_debug_level(ctx, CIO_INFO);
+    cio_debug_test(ctx);
 
     if (!ctx) {
         exit(EXIT_FAILURE);

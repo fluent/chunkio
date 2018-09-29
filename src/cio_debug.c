@@ -17,26 +17,36 @@
  *  limitations under the License.
  */
 
-#ifndef CHUNKIO_H
-#define CHUNKIO_H
+#include <stdio.h>
+#include <stdarg.h>
 
-/* debug levels */
-#define CIO_ERROR  1
-#define CIO_WARN   2
-#define CIO_INFO   3
-#define CIO_DEBUG  4
+#include <chunkio/chunkio.h>
+#include <chunkio/cio_debug.h>
 
-struct cio_ctx {
-    char *root_path;
-    int log_level;
-    void (*log_cb)(void *, const char *, int, const char *);
-};
+void cio_debug_print(void *ctx, int level, const char *file, int line,
+                     const char *fmt, ...)
+{
+    int ret;
+    char buf[CIO_DEBUG_BUF_SIZE];
+    va_list args;
+    struct cio_ctx *cio = ctx;
 
-struct cio_ctx *cio_create(const char *root_path);
-void cio_destroy(struct cio_ctx *ctx);
+    if (!cio->log_cb) {
+       return;
+    }
 
-int cio_set_debug_callback(struct cio_ctx *ctx, void (*log_cb));
-int cio_set_debug_level(struct cio_ctx *ctx, int level);
-void cio_debug_test(void *ctx);
+    if (level <= cio->log_level) {
+        return;
+    }
 
-#endif
+    va_start(args, fmt);
+    ret = vsnprintf(buf, CIO_DEBUG_BUF_SIZE - 1, fmt, args);
+
+    if (ret >= 0) {
+        buf[ret] = '\n';
+        buf[ret + 1] = '\0';
+    }
+    va_end(args);
+
+    cio->log_cb(ctx, file, line, buf);
+}
