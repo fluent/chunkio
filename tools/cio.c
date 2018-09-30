@@ -45,19 +45,24 @@ int main(int argc, char **argv)
     int ret;
     int opt;
     int optid = 1;
+    int verbose = CIO_INFO;
     char *root_path = NULL;
     struct cio_ctx *ctx;
 
     static const struct option long_opts[] = {
         {"root"       , required_argument, NULL, 'r'},
+        {"verbose"    , no_argument      , NULL, 'v'},
         {"help"       , no_argument      , NULL, 'h'},
     };
 
-    while ((opt = getopt_long(argc, argv, "r:h",
+    while ((opt = getopt_long(argc, argv, "r:vh",
                               long_opts, NULL)) != -1) {
         switch (opt) {
         case 'r':
             root_path = strdup(optarg);
+            break;
+        case 'v':
+            verbose++;
             break;
         case 'h':
             cio_help(EXIT_SUCCESS);
@@ -76,7 +81,7 @@ int main(int argc, char **argv)
     free(root_path);
 
     cio_set_debug_callback(ctx, debug_cb);
-    cio_set_debug_level(ctx, CIO_INFO);
+    cio_set_debug_level(ctx, verbose);
     cio_debug_test(ctx);
 
     if (!ctx) {

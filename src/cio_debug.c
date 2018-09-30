@@ -35,7 +35,7 @@ void cio_debug_print(void *ctx, int level, const char *file, int line,
        return;
     }
 
-    if (level <= cio->log_level) {
+    if (level > cio->log_level) {
         return;
     }
 
