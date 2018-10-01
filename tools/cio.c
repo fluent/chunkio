@@ -34,8 +34,8 @@ static void cio_help(int rc)
     exit(rc);
 }
 
-static int debug_cb(struct cio_ctx *ctx, const char *file, int line,
-                    char *str)
+static int log_cb(struct cio_ctx *ctx, const char *file, int line,
+                  char *str)
 {
     printf("[chunkio] %s:%i: %s", file, line, str);
 }
@@ -80,9 +80,8 @@ int main(int argc, char **argv)
     ctx = cio_create(root_path);
     free(root_path);
 
-    cio_set_debug_callback(ctx, debug_cb);
-    cio_set_debug_level(ctx, verbose);
-    cio_debug_test(ctx);
+    cio_set_log_callback(ctx, log_cb);
+    cio_set_log_level(ctx, verbose);
 
     if (!ctx) {
         exit(EXIT_FAILURE);
