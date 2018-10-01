@@ -17,13 +17,16 @@
  *  limitations under the License.
  */
 
-#ifndef CIO_DEBUG_H
-#define CIO_DEBUG_H
+#ifndef CIO_LOG_H
+#define CIO_LOG_H
 
-#define CIO_DEBUG_BUF_SIZE  256
+#include <errno.h>
+
+#define CIO_LOG_BUF_SIZE  256
 
 void cio_log_print(void *ctx, int level, const char *file, int line,
                      const char *fmt, ...);
+int cio_errno_print(int errnum, const char *file, int line);
 
 #define cio_log_error(ctx, fmt, ...)                \
     cio_log_print(ctx, CIO_ERROR, __FILENAME__,     \
@@ -40,5 +43,11 @@ void cio_log_print(void *ctx, int level, const char *file, int line,
 #define cio_log_debug(ctx, fmt, ...)                \
     cio_log_print(ctx, CIO_DEBUG, __FILENAME__,     \
                   __LINE__, fmt, ##__VA_ARGS__)
+
+#ifdef __FILENAME__
+#define cio_errno() cio_errno_print(errno, __FILENAME__, __LINE__)
+#else
+#define cio_errno() cio_errno_print(errno, __FILE__, __LINE__)
+#endif
 
 #endif

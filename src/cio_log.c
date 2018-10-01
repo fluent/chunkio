@@ -19,6 +19,7 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_log.h>
@@ -27,7 +28,7 @@ void cio_log_print(void *ctx, int level, const char *file, int line,
                    const char *fmt, ...)
 {
     int ret;
-    char buf[CIO_DEBUG_BUF_SIZE];
+    char buf[CIO_LOG_BUF_SIZE];
     va_list args;
     struct cio_ctx *cio = ctx;
 
@@ -40,7 +41,7 @@ void cio_log_print(void *ctx, int level, const char *file, int line,
     }
 
     va_start(args, fmt);
-    ret = vsnprintf(buf, CIO_DEBUG_BUF_SIZE - 1, fmt, args);
+    ret = vsnprintf(buf, CIO_LOG_BUF_SIZE - 1, fmt, args);
 
     if (ret >= 0) {
         buf[ret] = '\n';
@@ -49,4 +50,14 @@ void cio_log_print(void *ctx, int level, const char *file, int line,
     va_end(args);
 
     cio->log_cb(ctx, file, line, buf);
+}
+
+int cio_errno_print(int errnum, const char *file, int line)
+{
+    char buf[256];
+
+    strerror_r(errnum, buf, sizeof(buf) - 1);
+    fprintf(stderr, "[%s:%i errno=%i] %s\n",
+            file, line, errnum, buf);
+    return 0;
 }
