@@ -1,7 +1,7 @@
 set(src
   cio_os.c
+  cio_log.c
   cio_file.c
-  cio_debug.c
   chunkio.c
   )
 

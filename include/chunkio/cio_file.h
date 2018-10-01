@@ -22,6 +22,9 @@
 
 struct cio_file {
     int fd;
+    size_t data_size;
+    size_t alloc_size;
+    char *map;
 };
 
 #endif

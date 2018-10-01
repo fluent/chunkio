@@ -17,10 +17,24 @@
  *  limitations under the License.
  */
 
-struct cio_file *cio_file_create()
+#include <stdio.h>
+#include <stdlib.h>
+
+#include <chunkio/chunkio.h>
+#include <chunkio/cio_file.h>
+
+struct cio_file *cio_file_create(struct cio_ctx *ctx, size_t size)
 {
+    struct cio_file *cf;
+    (void) ctx;
 
+    cf = malloc(sizeof(struct cio_file));
+    if (!cf) {
+        perror("malloc");
+        return NULL;
+    }
 
+    return cf;
 }
 
 int cio_file_destroy()

@@ -24,7 +24,7 @@
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_os.h>
-#include <chunkio/cio_debug.h>
+#include <chunkio/cio_log.h>
 
 /*
  * Validate if root_path exists, if don't, create it, otherwise
@@ -85,16 +85,12 @@ void cio_destroy(struct cio_ctx *ctx)
     free(ctx);
 }
 
-int cio_set_debug_callback(struct cio_ctx *ctx, void (*log_cb))
+int cio_set_log_callback(struct cio_ctx *ctx, void (*log_cb))
 {
     ctx->log_cb = log_cb;
 }
 
-int cio_set_debug_level(struct cio_ctx *ctx, int level)
+int cio_set_log_level(struct cio_ctx *ctx, int level)
 {
     ctx->log_level = level;
 }
-
-void cio_debug_test(void *ctx) {
-    CIO_DEBUG_MSG(ctx, CIO_DEBUG, "test debug message OK");
-};
