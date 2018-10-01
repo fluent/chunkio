@@ -20,6 +20,8 @@
 #ifndef CHUNKIO_H
 #define CHUNKIO_H
 
+#include <monkey/mk_core/mk_list.h>
+
 /* debug levels */
 #define CIO_ERROR  1
 #define CIO_WARN   2
@@ -28,8 +30,13 @@
 
 struct cio_ctx {
     char *root_path;
+
+    /* logging */
     int log_level;
     void (*log_cb)(void *, const char *, int, const char *);
+
+    /* streams */
+    struct mk_list streams;
 };
 
 struct cio_ctx *cio_create(const char *root_path);
