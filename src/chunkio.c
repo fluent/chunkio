@@ -25,6 +25,7 @@
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_os.h>
 #include <chunkio/cio_log.h>
+#include <monkey/mk_core/mk_list.h>
 
 /*
  * Validate if root_path exists, if don't, create it, otherwise
@@ -76,6 +77,7 @@ struct cio_ctx *cio_create(const char *root_path)
         return NULL;
     }
 
+    mk_list_init(&ctx->streams);
     return ctx;
 }
 

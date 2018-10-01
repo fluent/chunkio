@@ -21,10 +21,23 @@
 #define CIO_FILE_H
 
 struct cio_file {
-    int fd;
-    size_t data_size;
-    size_t alloc_size;
-    char *map;
+    int fd;                   /* file descriptor      */
+    size_t data_size;         /* number of bytes used */
+    size_t alloc_size;        /* allocated size       */
+    char *name;               /* name of file         */
+    char *path;               /* root path + stream   */
+    char *map;                /* map of data          */
+    struct cio_ctx *ctx;      /* library context      */
+    struct cio_stream *st;    /* stream context       */
+    struct mk_list _head;     /* head link to stream->files */
 };
+
+struct cio_file *cio_file_create(struct cio_ctx *ctx,
+                                 struct cio_stream *st,
+                                 const char *name,
+                                 size_t size);
+void cio_file_destroy(struct cio_file *cf);
+int cio_file_write(struct cio_file *cf, const void *buf, size_t count);
+int cio_file_sync(struct cio_file *cf);
 
 #endif
