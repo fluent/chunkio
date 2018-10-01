@@ -32,10 +32,10 @@
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
 
-struct cio_file *cio_file_create(struct cio_ctx *ctx,
-                                 struct cio_stream *st,
-                                 const char *name,
-                                 size_t size)
+struct cio_file *cio_file_open(struct cio_ctx *ctx,
+                               struct cio_stream *st,
+                               const char *name,
+                               size_t size)
 {
     int fd;
     int psize;
@@ -69,6 +69,8 @@ struct cio_file *cio_file_create(struct cio_ctx *ctx,
         free(path);
         return NULL;
     }
+    cf->ctx = ctx;
+
     cf->name = strdup(name);
     if (!cf->name) {
         cio_errno();
@@ -82,7 +84,8 @@ struct cio_file *cio_file_create(struct cio_ctx *ctx,
     cf->fd = open(path, O_RDWR | O_CREAT, (mode_t) 0600);
     if (cf->fd == -1) {
         cio_errno();
-        cio_file_destroy(cf);
+        cio_log_error(ctx, "cannot open/create %s", path);
+        cio_file_close(cf);
         return NULL;
     }
 
@@ -92,14 +95,27 @@ struct cio_file *cio_file_create(struct cio_ctx *ctx,
     if (cf->map == MAP_FAILED) {
         cio_errno();
         cf->map = NULL;
-        cio_file_destroy(cf);
+        cio_file_close(cf);
         return NULL;
     }
+
+    /* Set size */
+    ret = ftruncate(cf->fd, size);
+    if (ret == -1) {
+        cio_errno();
+        cio_file_close(cf);
+        return NULL;
+    }
+
+    cf->alloc_size = size;
+    cf->data_size = 0;
+
+    cio_log_debug(ctx, "%s:%s mapped OK", st->name, cf->name);
 
     return cf;
 }
 
-void cio_file_destroy(struct cio_file *cf)
+void cio_file_close(struct cio_file *cf)
 {
     close(cf->fd);
     mk_list_del(&cf->_head);
@@ -118,11 +134,13 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
 {
     if (cf->data_size + count > cf->alloc_size) {
         cio_log_error(cf->ctx,
-                      "[chunkio file] given data exceeds allocated space");
+                      "[chunkio file] data exceeds available space "
+                      "(alloc=%lu current_size=%lu write_size=%lu)",
+                      cf->alloc_size, cf->data_size, count);
         return -1;
     }
 
-    memcpy(cf->map, buf, count);
+    memcpy(cf->map + cf->data_size, buf, count);
     cf->data_size += count;
 
     return 0;
@@ -132,7 +150,17 @@ int cio_file_sync(struct cio_file *cf)
 {
     int ret;
 
-    ret = msync(cf->map, cf->alloc_size, MS_SYNC);
+    /* If there available space, truncate the file */
+    if (cf->data_size < cf->alloc_size) {
+        ret = ftruncate(cf->fd, cf->data_size);
+        if (ret == -1) {
+            cio_errno();
+            cio_log_error(cf->ctx, "[chunkio file] error adjusting size");
+        }
+    }
+
+    /* Commit changes to disk */
+    ret = msync(cf->map, cf->data_size, MS_SYNC);
     if (ret == -1) {
         cio_errno();
         return -1;

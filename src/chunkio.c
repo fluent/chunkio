@@ -31,7 +31,7 @@
  * Validate if root_path exists, if don't, create it, otherwise
  * check if we have write access to it.
  */
-static int check_root_path(const char *root_path)
+static int check_root_path(struct cio_ctx *ctx, const char *root_path)
 {
     int ret;
 
@@ -42,6 +42,7 @@ static int check_root_path(const char *root_path)
         if (ret == -1) {
             return -1;
         }
+        cio_log_info(ctx, "created root path %s", root_path);
         return 0;
     }
 
@@ -49,24 +50,27 @@ static int check_root_path(const char *root_path)
     return access(root_path, W_OK);
 }
 
-struct cio_ctx *cio_create(const char *root_path)
+struct cio_ctx *cio_create(const char *root_path,
+                           void (*log_cb), int log_level)
 {
     int ret;
     struct cio_ctx *ctx;
-
-    /* Check or initialize file system root path */
-    ret = check_root_path(root_path);
-    if (ret == -1) {
-        fprintf(stderr,
-                "[chunkio] cannot initialize root path %s\n",
-                root_path);
-        return NULL;
-    }
 
     /* Create context */
     ctx = calloc(1, sizeof(struct cio_ctx));
     if (!ctx) {
         perror("calloc");
+        return NULL;
+    }
+    cio_set_log_callback(ctx, log_cb);
+    cio_set_log_level(ctx, log_level);
+
+    /* Check or initialize file system root path */
+    ret = check_root_path(ctx, root_path);
+    if (ret == -1) {
+        cio_log_error(ctx,
+                      "[chunkio] cannot initialize root path %s\n",
+                      root_path);
         return NULL;
     }
 

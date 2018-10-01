@@ -17,19 +17,64 @@
  *  limitations under the License.
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <chunkio/chunkio.h>
+#include <chunkio/cio_os.h>
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
 
+static int check_stream_path(struct cio_ctx *ctx, const char *path)
+{
+    int ret;
+    int len;
+    char *p;
+
+    /* Compose final path */
+    len = strlen(ctx->root_path) + strlen(path) + 2;
+    p = malloc(len + 1);
+    if (!p) {
+        cio_errno();
+        return -1;
+    }
+    ret = snprintf(p, len, "%s/%s", ctx->root_path, path);
+    if (ret == -1) {
+        cio_errno();
+        free(p);
+        return -1;
+    }
+
+    ret = cio_os_isdir(p);
+    if (ret == -1) {
+        /* Try to create the path */
+        ret = cio_os_mkpath(p, 0755);
+        if (ret == -1) {
+            cio_log_error(ctx, "cannot create stream path %s", p);
+            return -1;
+        }
+        cio_log_debug(ctx, "created stream path %s", p);
+        return 0;
+    }
+
+    /* Directory already exists, check write access */
+    return access(p, W_OK);
+}
+
 struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name)
 {
+    int ret;
     struct cio_stream *st;
 
     if (!name) {
         cio_log_error(ctx, "[stream create] stream name not set");
+        return NULL;
+    }
+
+    ret = check_stream_path(ctx, name);
+    if (ret == -1) {
         return NULL;
     }
 

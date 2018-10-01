@@ -22,6 +22,9 @@
 
 #include <monkey/mk_core/mk_list.h>
 
+#define CIO_FALSE   0
+#define CIO_TRUE   !0
+
 /* debug levels */
 #define CIO_ERROR  1
 #define CIO_WARN   2
@@ -39,7 +42,8 @@ struct cio_ctx {
     struct mk_list streams;
 };
 
-struct cio_ctx *cio_create(const char *root_path);
+struct cio_ctx *cio_create(const char *root_path,
+                           void (*log_cb), int log_level);
 void cio_destroy(struct cio_ctx *ctx);
 
 int cio_set_log_callback(struct cio_ctx *ctx, void (*log_cb));

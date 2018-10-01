@@ -32,11 +32,11 @@ struct cio_file {
     struct mk_list _head;     /* head link to stream->files */
 };
 
-struct cio_file *cio_file_create(struct cio_ctx *ctx,
-                                 struct cio_stream *st,
-                                 const char *name,
-                                 size_t size);
-void cio_file_destroy(struct cio_file *cf);
+struct cio_file *cio_file_open(struct cio_ctx *ctx,
+                               struct cio_stream *st,
+                               const char *name,
+                               size_t size);
+void cio_file_close(struct cio_file *cf);
 int cio_file_write(struct cio_file *cf, const void *buf, size_t count);
 int cio_file_sync(struct cio_file *cf);
 
