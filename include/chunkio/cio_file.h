@@ -22,8 +22,11 @@
 
 struct cio_file {
     int fd;                   /* file descriptor      */
+    int synced;               /* sync after latest write ? */
+    int mapped;               /* is the file content mapped ? */
     size_t data_size;         /* number of bytes used */
     size_t alloc_size;        /* allocated size       */
+    size_t realloc_size;      /* chunk size to increase alloc */
     char *name;               /* name of file         */
     char *path;               /* root path + stream   */
     char *map;                /* map of data          */
@@ -35,9 +38,11 @@ struct cio_file {
 struct cio_file *cio_file_open(struct cio_ctx *ctx,
                                struct cio_stream *st,
                                const char *name,
+                               int flags,
                                size_t size);
 void cio_file_close(struct cio_file *cf);
 int cio_file_write(struct cio_file *cf, const void *buf, size_t count);
 int cio_file_sync(struct cio_file *cf);
+int cio_file_close_stream(struct cio_stream *st);
 
 #endif

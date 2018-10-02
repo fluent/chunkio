@@ -17,6 +17,8 @@
  *  limitations under the License.
  */
 
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +28,7 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_file.h>
@@ -35,13 +38,16 @@
 struct cio_file *cio_file_open(struct cio_ctx *ctx,
                                struct cio_stream *st,
                                const char *name,
+                               int flags,
                                size_t size)
 {
     int fd;
     int psize;
     int ret;
+    int oflags;
     char *path;
     struct cio_file *cf;
+    struct stat fst;
     (void) ctx;
 
     /* Compose path for the file */
@@ -70,6 +76,8 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
         return NULL;
     }
     cf->ctx = ctx;
+    cf->st = st;
+    cf->realloc_size = getpagesize() * 8;
 
     cf->name = strdup(name);
     if (!cf->name) {
@@ -80,14 +88,30 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     cf->path = path;
     mk_list_add(&cf->_head, &st->files);
 
+    oflags = O_RDWR | O_CREAT;
+    if (flags & CIO_OPEN) {
+        oflags |= O_TRUNC;
+    }
+
     /* Open file descriptor */
-    cf->fd = open(path, O_RDWR | O_CREAT, (mode_t) 0600);
+    cf->fd = open(path, oflags, (mode_t) 0600);
     if (cf->fd == -1) {
         cio_errno();
         cio_log_error(ctx, "cannot open/create %s", path);
         cio_file_close(cf);
         return NULL;
     }
+
+    if (flags & CIO_OPEN_RD) {
+        /* Check if the file exists */
+        ret = fstat(cf->fd, &fst);
+        if (ret == 0 && fst.st_size > 0) {
+            /* override size, file might already exists */
+            size = fst.st_size;
+        }
+    }
+
+    printf("size => %s %lu\n", path, size);
 
     /* Mmap */
     cf->map = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED,
@@ -117,14 +141,25 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
 
 void cio_file_close(struct cio_file *cf)
 {
-    close(cf->fd);
-    mk_list_del(&cf->_head);
+    int ret;
 
+    /* check if the file needs to be synchronized */
+    if (cf->synced == CIO_FALSE && cf->map) {
+        ret = cio_file_sync(cf);
+        if (ret == -1) {
+            cio_log_error(cf->ctx,
+                          "[cio file] error doing file sync on close at "
+                          "%s:%s", cf->st->name, cf->name);
+        }
+    }
+
+    /* unmap file */
     if (cf->map) {
-        msync(cf->map, cf->alloc_size, MS_SYNC);
         munmap(cf->map, cf->alloc_size);
     }
 
+    close(cf->fd);
+    mk_list_del(&cf->_head);
     free(cf->name);
     free(cf->path);
     free(cf);
@@ -132,16 +167,54 @@ void cio_file_close(struct cio_file *cf)
 
 int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
 {
-    if (cf->data_size + count > cf->alloc_size) {
-        cio_log_error(cf->ctx,
-                      "[chunkio file] data exceeds available space "
-                      "(alloc=%lu current_size=%lu write_size=%lu)",
-                      cf->alloc_size, cf->data_size, count);
-        return -1;
+    int ret;
+    void *tmp;
+    size_t av_size;
+    size_t new_size;
+
+    /* get available size */
+    av_size = (cf->alloc_size - cf->data_size);
+
+    /* validate there is enough space, otherwise resize */
+    if (count > av_size) {
+        if (av_size + cf->realloc_size < count) {
+            new_size = count;
+            cio_log_debug(cf->ctx,
+                          "[cio file] realloc size is not big enough "
+                          "for incoming data, consider to increase it");
+        }
+        else {
+            new_size = cf->alloc_size + cf->realloc_size;
+        }
+        tmp = mremap(cf->map, cf->alloc_size,
+                     new_size, MREMAP_MAYMOVE);
+        if (tmp == MAP_FAILED) {
+            cio_errno();
+            cio_log_error(cf->ctx,
+                          "[cio file] data exceeds available space "
+                          "(alloc=%lu current_size=%lu write_size=%lu)",
+                          cf->alloc_size, cf->data_size, count);
+            return -1;
+        }
+
+
+        cf->map = tmp;
+        cio_log_debug(cf->ctx,
+                      "[cio file] alloc_size from %lu to %lu",
+                      cf->alloc_size, new_size);
+        cf->alloc_size = new_size;
+        ret = ftruncate(cf->fd, cf->alloc_size);
+        if (ret == -1) {
+            cio_errno();
+            cio_log_error(cf->ctx,
+                          "[cio_file] error setting new file size on write");
+            return -1;
+        }
     }
 
     memcpy(cf->map + cf->data_size, buf, count);
     cf->data_size += count;
+    cf->synced = CIO_FALSE;
 
     return 0;
 }
@@ -150,13 +223,16 @@ int cio_file_sync(struct cio_file *cf)
 {
     int ret;
 
-    /* If there available space, truncate the file */
+    /* If there extra space, truncate the file size */
     if (cf->data_size < cf->alloc_size) {
         ret = ftruncate(cf->fd, cf->data_size);
         if (ret == -1) {
             cio_errno();
-            cio_log_error(cf->ctx, "[chunkio file] error adjusting size");
+            cio_log_error(cf->ctx,
+                          "[cio file sync] error adjusting size at: "
+                          " %s/%s", cf->st->name, cf->name);
         }
+        cf->alloc_size = cf->data_size;
     }
 
     /* Commit changes to disk */
@@ -164,6 +240,30 @@ int cio_file_sync(struct cio_file *cf)
     if (ret == -1) {
         cio_errno();
         return -1;
+    }
+
+    cf->synced = CIO_TRUE;
+    cio_log_debug(cf->ctx, "[cio file] file synced at: %s/%s",
+                  cf->st->name, cf->name);
+    return 0;
+}
+
+/* Set a reallocation chunk size */
+void cio_file_realloc_size(struct cio_file *cf, size_t chunk_size)
+{
+    cf->realloc_size = chunk_size;
+}
+
+/* Close all files owned by the given stream */
+int cio_file_close_stream(struct cio_stream *st)
+{
+    struct mk_list *tmp;
+    struct mk_list *head;
+    struct cio_file *cf;
+
+    mk_list_foreach_safe(head, tmp, &st->files) {
+        cf = mk_list_entry(head, struct cio_file, _head);
+        cio_file_close(cf);
     }
 
     return 0;
