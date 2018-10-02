@@ -31,5 +31,6 @@ struct cio_stream {
 
 struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name);
 void cio_stream_destroy(struct cio_stream *st);
+void cio_stream_destroy_all(struct cio_ctx *ctx);
 
 #endif

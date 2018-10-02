@@ -25,7 +25,10 @@
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_os.h>
 #include <chunkio/cio_log.h>
+#include <chunkio/cio_file.h>
 #include <chunkio/cio_stream.h>
+
+#include <monkey/mk_core/mk_list.h>
 
 static int check_stream_path(struct cio_ctx *ctx, const char *path)
 {
@@ -53,14 +56,18 @@ static int check_stream_path(struct cio_ctx *ctx, const char *path)
         ret = cio_os_mkpath(p, 0755);
         if (ret == -1) {
             cio_log_error(ctx, "cannot create stream path %s", p);
+            free(p);
             return -1;
         }
         cio_log_debug(ctx, "created stream path %s", p);
+        free(p);
         return 0;
     }
 
-    /* Directory already exists, check write access */
-    return access(p, W_OK);
+    /* Check write access and release*/
+    ret = access(p, W_OK);
+    free(p);
+    return ret;
 }
 
 struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name)
@@ -95,12 +102,33 @@ struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name)
     mk_list_init(&st->files);
     mk_list_add(&st->_head, &ctx->streams);
 
+    cio_log_debug(ctx, "[cio stream] new stream registered: %s", name);
     return st;
 }
 
 void cio_stream_destroy(struct cio_stream *st)
 {
+    struct mk_list *tmp;
+    struct mk_list *head;
+    struct cio_file *cf;
+
+    /* close all files */
+    cio_file_close_stream(st);
+
+    /* destroy stream */
     mk_list_del(&st->_head);
     free(st->name);
     free(st);
+}
+
+void cio_stream_destroy_all(struct cio_ctx *ctx)
+{
+    struct mk_list *tmp;
+    struct mk_list *head;
+    struct cio_stream *st;
+
+    mk_list_foreach_safe(head, tmp, &ctx->streams) {
+        st = mk_list_entry(head, struct cio_stream, _head);
+        cio_stream_destroy(st);
+    }
 }
