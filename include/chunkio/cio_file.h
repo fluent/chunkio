@@ -22,6 +22,7 @@
 
 struct cio_file {
     int fd;                   /* file descriptor      */
+    int flags;                /* open flags */
     int synced;               /* sync after latest write ? */
     int mapped;               /* is the file content mapped ? */
     size_t data_size;         /* number of bytes used */

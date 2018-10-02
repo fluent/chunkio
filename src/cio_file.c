@@ -76,6 +76,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
         return NULL;
     }
     cf->ctx = ctx;
+    cf->flags = flags;
     cf->st = st;
     cf->realloc_size = getpagesize() * 8;
 
@@ -88,13 +89,14 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     cf->path = path;
     mk_list_add(&cf->_head, &st->files);
 
-    oflags = O_RDWR | O_CREAT;
+    /* Open file descriptor */
     if (flags & CIO_OPEN) {
-        oflags |= O_TRUNC;
+        cf->fd = open(path, O_RDWR | O_CREAT | O_TRUNC, (mode_t) 0600);
+    }
+    else if (flags & CIO_OPEN_RD) {
+        cf->fd = open(path, O_RDONLY);
     }
 
-    /* Open file descriptor */
-    cf->fd = open(path, oflags, (mode_t) 0600);
     if (cf->fd == -1) {
         cio_errno();
         cio_log_error(ctx, "cannot open/create %s", path);
@@ -105,17 +107,21 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     if (flags & CIO_OPEN_RD) {
         /* Check if the file exists */
         ret = fstat(cf->fd, &fst);
-        if (ret == 0 && fst.st_size > 0) {
+        if (ret == 0 && fst.st_size >= 0) {
             /* override size, file might already exists */
             size = fst.st_size;
         }
     }
 
-    printf("size => %s %lu\n", path, size);
-
     /* Mmap */
-    cf->map = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED,
-                   cf->fd, 0);
+    if (flags & CIO_OPEN) {
+        oflags = PROT_READ | PROT_WRITE;
+    }
+    else if (flags & CIO_OPEN_RD) {
+        oflags = PROT_READ;
+    }
+
+    cf->map = mmap(0, size, oflags, MAP_SHARED, cf->fd, 0);
     if (cf->map == MAP_FAILED) {
         cio_errno();
         cf->map = NULL;
@@ -124,15 +130,20 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     }
 
     /* Set size */
-    ret = ftruncate(cf->fd, size);
-    if (ret == -1) {
-        cio_errno();
-        cio_file_close(cf);
-        return NULL;
+    if (flags & CIO_OPEN) {
+        ret = ftruncate(cf->fd, size);
+        if (ret == -1) {
+            cio_errno();
+            cio_file_close(cf);
+            return NULL;
+        }
+        cf->data_size = 0;
     }
-
+    else if (flags & CIO_OPEN_RD) {
+        cf->data_size = size;
+        cf->synced = CIO_TRUE;
+    }
     cf->alloc_size = size;
-    cf->data_size = 0;
 
     cio_log_debug(ctx, "%s:%s mapped OK", st->name, cf->name);
 
@@ -222,6 +233,10 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
 int cio_file_sync(struct cio_file *cf)
 {
     int ret;
+
+    if (cf->flags & CIO_OPEN_RD) {
+        return 0;
+    }
 
     /* If there extra space, truncate the file size */
     if (cf->data_size < cf->alloc_size) {
