@@ -23,5 +23,6 @@
 #include <chunkio/chunkio.h>
 
 int cio_scan_streams(struct cio_ctx *ctx);
+void cio_scan_dump(struct cio_ctx *ctx);
 
 #endif

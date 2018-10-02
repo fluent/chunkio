@@ -54,6 +54,7 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
     dir = opendir(path);
     if (!dir) {
         cio_errno();
+        free(path);
         return -1;
     }
 
@@ -73,6 +74,9 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
         /* register every directory as a stream */
         cf = cio_file_open(ctx, st, ent->d_name, CIO_OPEN_RD, 0);
     }
+
+    closedir(dir);
+    free(path);
 
     return 0;
 }
@@ -112,5 +116,31 @@ int cio_scan_streams(struct cio_ctx *ctx)
         }
     }
 
+    closedir(dir);
     return 0;
+}
+
+void cio_scan_dump(struct cio_ctx *ctx)
+{
+    struct mk_list *head;
+    struct mk_list *f_head;
+    struct cio_stream *st;
+    struct cio_file *cf;
+    char tmp[PATH_MAX];
+
+    cio_log_info(ctx, "scan dump of %s", ctx->root_path);
+
+    /* Iterate streams */
+    mk_list_foreach(head, &ctx->streams) {
+        st = mk_list_entry(head, struct cio_stream, _head);
+        printf(" stream:%-60s%i chunks\n",
+               st->name, mk_list_size(&st->files));
+        mk_list_foreach(f_head, &st->files) {
+            cf = mk_list_entry(f_head, struct cio_file, _head);
+            snprintf(tmp, sizeof(tmp) -1, "%s/%s", st->name, cf->name);
+            printf("        %-60s", tmp);
+            printf("alloc_size=%lu, data_size=%lu\n",
+                   cf->alloc_size, cf->data_size);
+        }
+    }
 }
