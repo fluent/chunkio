@@ -27,12 +27,32 @@
 #include <limits.h>
 #include <signal.h>
 
+#define ANSI_RESET "\033[0m"
+#define ANSI_BOLD  "\033[1m"
+
+#define ANSI_CYAN          "\033[96m"
+#define ANSI_BOLD_CYAN     ANSI_BOLD ANSI_CYAN
+#define ANSI_MAGENTA       "\033[95m"
+#define ANSI_BOLD_MAGENTA  ANSI_BOLD ANSI_MAGENTA
+#define ANSI_RED           "\033[91m"
+#define ANSI_BOLD_RED      ANSI_BOLD ANSI_RED
+#define ANSI_YELLOW        "\033[93m"
+
+#define ANSI_BOLD_YELLOW   ANSI_BOLD ANSI_YELLOW
+#define ANSI_BLUE          "\033[94m"
+#define ANSI_BOLD_BLUE     ANSI_BOLD ANSI_BLUE
+#define ANSI_GREEN         "\033[92m"
+#define ANSI_BOLD_GREEN    ANSI_BOLD ANSI_GREEN
+#define ANSI_WHITE         "\033[97m"
+#define ANSI_BOLD_WHITE    ANSI_BOLD ANSI_WHITE
+
 #define CIO_ROOT_PATH  ".cio"
 #define cio_print_signal(X) case X:                       \
     write (STDERR_FILENO, #X ")\n" , sizeof(#X ")\n")-1); \
     break;
 
 #include <chunkio/chunkio.h>
+#include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_file.h>
 
@@ -75,6 +95,31 @@ static void cio_signal_handler(int signal)
     }
 }
 
+void cio_bytes_to_human_readable_size(size_t bytes,
+                                      char *out_buf, size_t size)
+{
+    unsigned long i;
+    unsigned long u = 1024;
+    static const char *__units[] = {
+        "b", "K", "M", "G",
+        "T", "P", "E", "Z", "Y", NULL
+    };
+
+    for (i = 0; __units[i] != NULL; i++) {
+        if ((bytes / u) == 0) {
+            break;
+        }
+        u *= 1024;
+    }
+    if (!i) {
+        snprintf(out_buf, size, "%lu%s", (long unsigned int) bytes, __units[0]);
+    }
+    else {
+        float fsize = (float) ((double) bytes / (u / 1024));
+        snprintf(out_buf, size, "%.1f%s", fsize, __units[i]);
+    }
+}
+
 static void cio_signal_init()
 {
     signal(SIGINT,  &cio_signal_handler);
@@ -87,7 +132,23 @@ static void cio_signal_init()
 static int log_cb(struct cio_ctx *ctx, const char *file, int line,
                   char *str)
 {
-    printf("[chunkio] %s:%i: %s", file, line, str);
+    char *dtitle = "chunkio";
+    char *dcolor = ANSI_BLUE;
+
+    /* messages from this own client are in yellow */
+    if (*file == 't') {
+        dtitle = "  cli  ";
+        dcolor = ANSI_YELLOW;
+    }
+
+    if (ctx->log_level > CIO_INFO) {
+        printf("%s[%s]%s %-60s => %s%s:%i%s\n",
+               dcolor, dtitle, ANSI_RESET, str,
+               dcolor, file, line, ANSI_RESET);
+    }
+    else {
+        printf("%s[%s]%s %s\n", dcolor, dtitle, ANSI_RESET, str);
+    }
 }
 
 static int cio_default_root_path(char *path, int size)
@@ -112,34 +173,43 @@ static int cio_default_root_path(char *path, int size)
     return 0;
 }
 
-static int cio_stdin(struct cio_ctx *ctx, const char *stream,
-                     const char *fname)
+/* command/list: iterate root path and list content */
+static int cb_cmd_list(struct cio_ctx *ctx)
+{
+    /* FIXME: creation context must populate structures first */
+}
+
+/* command/stdin: read data from STDIN and dump it into stream/file */
+static int cb_cmd_stdin(struct cio_ctx *ctx, const char *stream,
+                        const char *fname)
 {
     int fd;
     int ret;
     size_t total = 0;
     ssize_t bytes;
-    char buf[4096];
+    char buf[1024*8];
     struct cio_stream *st;
     struct cio_file *cf;
 
     /* Prepare stream and file contexts */
     st = cio_stream_create(ctx, stream);
     if (!st) {
-        fprintf(stderr, "[chunkio cli] cannot create stream\n");
+        cio_log_error(ctx, "cannot create stream\n");
         return -1;
     }
 
-    cf = cio_file_open(ctx, st, fname, 1024*10*10*10*10);
+    /* Open a file with a hint of 32KB */
+    cf = cio_file_open(ctx, st, fname, CIO_OPEN, 1024*32);
     if (!cf) {
-        fprintf(stderr, "[chunkio cli] cannot create file\n");
+        cio_log_error(ctx, "cannot create file");
         return -1;
     }
 
+    /* Catch up stdin */
     fd = dup(STDIN_FILENO);
     if (fd == -1) {
         perror("dup");
-        fprintf(stderr, "[chunkio cli] cannot open standard input\n");
+        cio_log_error(ctx, "cannot open standard input");
         return -1;
     }
 
@@ -154,7 +224,7 @@ static int cio_stdin(struct cio_ctx *ctx, const char *stream,
         else {
             ret = cio_file_write(cf, buf, bytes);
             if (ret == -1) {
-                fprintf(stderr, "[chunkio cli] error writing to file\n");
+                cio_log_error(ctx, "error writing to file");
                 close(fd);
                 return -1;
             }
@@ -162,10 +232,16 @@ static int cio_stdin(struct cio_ctx *ctx, const char *stream,
         }
     } while (bytes > 0);
 
-    printf("total bytes read => %lu\n", total);
+    /* close stdin dup(2) */
     close(fd);
 
+    /* synchronize changes to disk and close */
     cio_file_sync(cf);
+    cio_file_close(cf);
+
+    /* print some status */
+    cio_bytes_to_human_readable_size(total, buf, sizeof(buf) - 1);
+    cio_log_info(ctx, "stdin total bytes => %lu (%s)", total, buf);
 
     return 0;
 }
@@ -174,8 +250,9 @@ int main(int argc, char **argv)
 {
     int ret;
     int opt;
-    int optid = 1;
-    int in_stdin = CIO_FALSE;
+    int opt_silent = CIO_FALSE;
+    int cmd_stdin = CIO_FALSE;
+    int cmd_list = CIO_FALSE;
     int verbose = CIO_INFO;
     char *fname = NULL;
     char *stream = NULL;
@@ -184,7 +261,9 @@ int main(int argc, char **argv)
     struct cio_ctx *ctx;
 
     static const struct option long_opts[] = {
+        {"list"       , no_argument      , NULL, 'l'},
         {"root"       , required_argument, NULL, 'r'},
+        {"silent"     , no_argument      , NULL, 'S'},
         {"stdin"      , no_argument      , NULL, 'i'},
         {"stream"     , required_argument, NULL, 's'},
         {"verbose"    , no_argument      , NULL, 'v'},
@@ -194,14 +273,20 @@ int main(int argc, char **argv)
     /* Initialize signals */
     cio_signal_init();
 
-    while ((opt = getopt_long(argc, argv, "r:is:f:vh",
+    while ((opt = getopt_long(argc, argv, "lr:Sis:f:vh",
                               long_opts, NULL)) != -1) {
         switch (opt) {
+        case 'l':
+            cmd_list = CIO_TRUE;
+            break;
+        case 'i':
+            cmd_stdin = CIO_TRUE;
+            break;
         case 'r':
             root_path = strdup(optarg);
             break;
-        case 'i':
-            in_stdin = CIO_TRUE;
+        case 'S':
+            opt_silent = CIO_TRUE;
             break;
         case 's':
             stream = strdup(optarg);
@@ -231,6 +316,10 @@ int main(int argc, char **argv)
         root_path = strdup(tmp);
     }
 
+    if (opt_silent == CIO_TRUE) {
+        verbose = 0;
+    }
+
     /* Create CIO instance */
     ctx = cio_create(root_path, log_cb, verbose);
     free(root_path);
@@ -239,8 +328,13 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    /* Dump data to file from stdin ? */
-    if (in_stdin == CIO_TRUE) {
+    /*
+     * Process commands and options
+     */
+    if (cmd_list == CIO_TRUE) {
+        ret = cb_cmd_list(ctx);
+    }
+    else if (cmd_stdin == CIO_TRUE) {
         /* we need the stream and file names */
         if (!stream) {
             fprintf(stderr, "[chunkio cli] missing stream name\n");
@@ -252,11 +346,12 @@ int main(int argc, char **argv)
             cio_help(EXIT_FAILURE);
         }
 
-        cio_stdin(ctx, stream, fname);
+        ret = cb_cmd_stdin(ctx, stream, fname);
     }
 
     free(stream);
     free(fname);
     cio_destroy(ctx);
-    return 0;
+
+    return ret;
 }
