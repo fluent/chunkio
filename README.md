@@ -33,13 +33,13 @@ It's up to the caller program how to define the names, basically it needs to set
 
 This repository comes with a tool for testing purposes called _cio_, a quick start for testing could be to stream a file over STDIN and flush it under a specific stream and chunk name, e.g:
 
-```
+```bash
 $ cat somefile | tools/cio -i -s stdin -f data -v
 ```
 
 the command above specify to gather data from the standard input (_-i_), use a stream called _stdin_ (_-s stdin_) and store the data into the chunk called _data_ (_-f data_)  and enabling some verbose messages (_-v_)
 
-```
+```bash
 [chunkio] created root path /home/edsiper/.cio             => src/chunkio.c:48
 [chunkio] [cio scan] opening path /home/edsiper/.cio       => src/cio_scan.c:95
 [chunkio] created stream path /home/edsiper/.cio/stdin     => src/cio_stream.c:62

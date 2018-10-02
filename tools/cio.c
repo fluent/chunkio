@@ -55,10 +55,11 @@
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_file.h>
+#include <chunkio/cio_scan.h>
 
 static void cio_help(int rc)
 {
-    printf("Usage: cio -r PATH\n\n");
+    printf("Usage: cio [-r PATH] OPTIONS\n\n");
     printf("Available Options\n");
     printf("  -r, --root[=PATH]\tset root path\n");
     printf("  -i, --stdin\t\tdump stdin data to stream/file\n");
@@ -176,7 +177,8 @@ static int cio_default_root_path(char *path, int size)
 /* command/list: iterate root path and list content */
 static int cb_cmd_list(struct cio_ctx *ctx)
 {
-    /* FIXME: creation context must populate structures first */
+    cio_scan_dump(ctx);
+    return 0;
 }
 
 /* command/stdin: read data from STDIN and dump it into stream/file */
@@ -328,6 +330,8 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    cio_log_info(ctx, "root_path => %s", ctx->root_path);
+
     /*
      * Process commands and options
      */
@@ -347,6 +351,9 @@ int main(int argc, char **argv)
         }
 
         ret = cb_cmd_stdin(ctx, stream, fname);
+    }
+    else {
+        cio_help(EXIT_FAILURE);
     }
 
     free(stream);
