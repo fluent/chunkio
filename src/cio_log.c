@@ -44,8 +44,7 @@ void cio_log_print(void *ctx, int level, const char *file, int line,
     ret = vsnprintf(buf, CIO_LOG_BUF_SIZE - 1, fmt, args);
 
     if (ret >= 0) {
-        buf[ret] = '\n';
-        buf[ret + 1] = '\0';
+        buf[ret] = '\0';
     }
     va_end(args);
 

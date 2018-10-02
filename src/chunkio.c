@@ -25,6 +25,9 @@
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_os.h>
 #include <chunkio/cio_log.h>
+#include <chunkio/cio_stream.h>
+#include <chunkio/cio_scan.h>
+
 #include <monkey/mk_core/mk_list.h>
 
 /*
@@ -82,11 +85,14 @@ struct cio_ctx *cio_create(const char *root_path,
     }
 
     mk_list_init(&ctx->streams);
+
+    cio_scan_streams(ctx);
     return ctx;
 }
 
 void cio_destroy(struct cio_ctx *ctx)
 {
+    cio_stream_destroy_all(ctx);
     free(ctx->root_path);
     free(ctx);
 }
