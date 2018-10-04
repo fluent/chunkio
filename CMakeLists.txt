@@ -31,7 +31,9 @@ endif()
 # Check if Address Sanitizer is enabled
 if(CIO_SANITIZE_ADDRESS OR SANITIZE_ADDRESS)
   set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/sanitizers-cmake/cmake" ${CMAKE_MODULE_PATH})
-  add_definitions(-DSANITIZE_ADDRESS=On)
+  if(NOT SANITIZE_ADDRESS)
+    add_definitions(-DSANITIZE_ADDRESS=On)
+  endif()
   find_package(Sanitizers)
 
   # Note that this package don't define Sanitizers_FOUND:

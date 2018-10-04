@@ -18,13 +18,8 @@ foreach(source_file ${UNIT_TESTS_FILES})
     ${source_file_we}
     ${source_file}
     )
-
-  add_sanitizers(${source_file_we})
   target_link_libraries(${source_file_we} chunkio-static)
+  add_sanitizers(${source_file_we})
 
   add_test(${source_file_we} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${source_file_we})
-  if("${CMAKE_C_COMPILER_ID}" STREQUAL "Clang" OR
-      "${CMAKE_C_COMPILER_ID}" STREQUAL "GNU")
-    set_property(TARGET ${source_file_we} APPEND_STRING PROPERTY COMPILE_FLAGS "-Wall -g -O3")
-  endif()
 endforeach()
