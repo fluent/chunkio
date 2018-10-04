@@ -73,10 +73,22 @@ static int check_stream_path(struct cio_ctx *ctx, const char *path)
 struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name)
 {
     int ret;
+    int len;
     struct cio_stream *st;
 
     if (!name) {
         cio_log_error(ctx, "[stream create] stream name not set");
+        return NULL;
+    }
+
+    len = strlen(name);
+    if (len == 0) {
+        cio_log_error(ctx, "[stream create] invalid stream name");
+        return NULL;
+    }
+
+    if (len == 1 && (name[0] == '.' || name[0] == '/')) {
+        cio_log_error(ctx, "[stream create] invalid stream name");
         return NULL;
     }
 
