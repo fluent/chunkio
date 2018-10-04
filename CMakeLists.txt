@@ -50,6 +50,7 @@ include_directories(
   deps/monkey/include
   )
 
+add_subdirectory(deps/sha1)
 add_subdirectory(src)
 add_subdirectory(tools)
 
