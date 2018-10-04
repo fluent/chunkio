@@ -59,6 +59,10 @@ struct cio_ctx *cio_create(const char *root_path,
     int ret;
     struct cio_ctx *ctx;
 
+    if (log_level < CIO_ERROR || log_level > CIO_DEBUG) {
+        return NULL;
+    }
+
     /* Create context */
     ctx = calloc(1, sizeof(struct cio_ctx));
     if (!ctx) {
@@ -74,6 +78,7 @@ struct cio_ctx *cio_create(const char *root_path,
         cio_log_error(ctx,
                       "[chunkio] cannot initialize root path %s\n",
                       root_path);
+        free(ctx);
         return NULL;
     }
 
