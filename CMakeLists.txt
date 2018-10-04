@@ -9,9 +9,24 @@ else()
 endif()
 
 # ChunkIO options
+option(CIO_DEV               "Enable dev/test mode"         Off)
 option(CIO_LIB_STATIC        "Enable static library build"  On)
 option(CIO_LIB_SHARED        "Enable shared library build"  Off)
 option(CIO_SANITIZE_ADDRESS  "Enable address sanitizer"     Off)
+option(CIO_TESTS             "Enable tests"                 Off)
+
+# Force Option value
+macro(CIO_OPTION option value)
+  set(${option} ${value} CACHE "" INTERNAL FORCE)
+endmacro()
+
+# Development/Test mode
+if(CIO_DEV)
+  CIO_OPTION(CMAKE_BUILD_TYPE      "Debug")
+  CIO_OPTION(CIO_SANITIZE_ADDRESS       On)
+  CIO_OPTION(CIO_TESTS                  On)
+  CIO_OPTION(CIO_LIB_STATIC             On)
+endif()
 
 # Check if Address Sanitizer is enabled
 if(CIO_SANITIZE_ADDRESS OR SANITIZE_ADDRESS)
@@ -35,3 +50,7 @@ include_directories(
 
 add_subdirectory(src)
 add_subdirectory(tools)
+
+if(CIO_TESTS)
+  add_subdirectory(tests)
+endif()
