@@ -14,7 +14,7 @@ option(CIO_LIB_SHARED        "Enable shared library build"  Off)
 option(CIO_SANITIZE_ADDRESS  "Enable address sanitizer"     Off)
 
 # Check if Address Sanitizer is enabled
-if(CIO_SANITIZE_ADDRESS)
+if(CIO_SANITIZE_ADDRESS OR SANITIZE_ADDRESS)
   set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/sanitizers-cmake/cmake" ${CMAKE_MODULE_PATH})
   add_definitions(-DSANITIZE_ADDRESS=On)
   find_package(Sanitizers)
