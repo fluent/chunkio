@@ -102,12 +102,17 @@ void cio_destroy(struct cio_ctx *ctx)
     free(ctx);
 }
 
-int cio_set_log_callback(struct cio_ctx *ctx, void (*log_cb))
+void cio_set_log_callback(struct cio_ctx *ctx, void (*log_cb))
 {
     ctx->log_cb = log_cb;
 }
 
 int cio_set_log_level(struct cio_ctx *ctx, int level)
 {
+    if (level < CIO_ERROR || level > CIO_DEBUG) {
+        return -1;
+    }
+
     ctx->log_level = level;
+    return 0;
 }

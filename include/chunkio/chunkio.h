@@ -50,7 +50,7 @@ struct cio_ctx *cio_create(const char *root_path,
                            void (*log_cb), int log_level);
 void cio_destroy(struct cio_ctx *ctx);
 
-int cio_set_log_callback(struct cio_ctx *ctx, void (*log_cb));
+void cio_set_log_callback(struct cio_ctx *ctx, void (*log_cb));
 int cio_set_log_level(struct cio_ctx *ctx, int level);
 
 #endif
