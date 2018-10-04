@@ -150,6 +150,8 @@ static int log_cb(struct cio_ctx *ctx, const char *file, int line,
     else {
         printf("%s[%s]%s %s\n", dcolor, dtitle, ANSI_RESET, str);
     }
+
+    return 0;
 }
 
 static int cio_default_root_path(char *path, int size)
