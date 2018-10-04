@@ -44,11 +44,33 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     int fd;
     int psize;
     int ret;
+    int len;
     int oflags;
     char *path;
     struct cio_file *cf;
     struct stat fst;
     (void) ctx;
+
+    if (!st) {
+        cio_log_error(ctx, "[cio file] invalid stream");
+        return NULL;
+    }
+
+    if (!name) {
+        cio_log_error(ctx, "[cio file] invalid file name");
+        return NULL;
+    }
+
+    len = strlen(name);
+    if (len == 0) {
+        cio_log_error(ctx, "[cio file] invalid file name");
+        return NULL;
+    }
+
+    if (len == 1 && (name[0] == '.' || name[0] == '/')) {
+        cio_log_error(ctx, "[cio file] invalid file name");
+        return NULL;
+    }
 
     /* Compose path for the file */
     psize = strlen(ctx->root_path) + strlen(st->name) + strlen(name);
