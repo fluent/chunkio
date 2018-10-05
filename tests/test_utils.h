@@ -17,20 +17,9 @@
  *  limitations under the License.
  */
 
-#ifndef CIO_SHA1_H
-#define CIO_SHA1_H
+#ifndef CIO_TESTS_UTILS_H
+#define CIO_TESTS_UTILS_H
 
-#include <sha1/sha1.h>
-
-struct cio_sha1 {
-    SHA_CTX sha;
-};
-
-void cio_sha1_init(struct cio_sha1 *ctx);
-void cio_sha1_update(struct cio_sha1 *ctx, const void *data, unsigned long len);
-void cio_sha1_final(unsigned char hash[20], struct cio_sha1 *ctx);
-void cio_sha1_hash(const void *data_in, unsigned long length,
-                   unsigned char *data_out);
-void cio_sha1_to_hex(unsigned char *in, char *out);
+int utils_recursive_delete(const char *dir);
 
 #endif

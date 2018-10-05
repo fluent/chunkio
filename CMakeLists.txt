@@ -47,6 +47,7 @@ endif()
 
 include_directories(
   include
+  deps/
   deps/monkey/include
   )
 

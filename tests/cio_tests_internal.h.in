@@ -21,6 +21,8 @@
 #define CIO_TEST_INTERNAL_H
 
 #include "lib/acutest/include/acutest.h"
+#include "test_utils.h"
+
 #define CIO_TESTS_DATA_PATH "@CIO_TESTS_DATA_PATH@"
 
 #endif

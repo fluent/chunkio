@@ -37,8 +37,8 @@ void cio_sha1_final(unsigned char hash[20], struct cio_sha1 *ctx)
     SHA1_Final(hash, &ctx->sha);
 }
 
-void cio_sha1_encode(const void *data_in, unsigned long length,
-                     unsigned char *data_out)
+void cio_sha1_hash(const void *data_in, unsigned long length,
+                   unsigned char *data_out)
 {
     SHA_CTX sha;
     SHA1_Init(&sha);
