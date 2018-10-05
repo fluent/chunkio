@@ -205,6 +205,11 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
     size_t av_size;
     size_t new_size;
 
+    if (count == 0) {
+        /* do nothing */
+        return 0;
+    }
+
     /* get available size */
     av_size = (cf->alloc_size - cf->data_size);
 
