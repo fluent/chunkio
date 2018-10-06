@@ -20,6 +20,8 @@
 #ifndef CIO_FILE_H
 #define CIO_FILE_H
 
+#include <chunkio/cio_file_st.h>
+
 struct cio_file {
     int fd;                   /* file descriptor      */
     int flags;                /* open flags */
@@ -31,6 +33,10 @@ struct cio_file {
     char *name;               /* name of file         */
     char *path;               /* root path + stream   */
     char *map;                /* map of data          */
+
+    /* cached addr */
+    char *st_content;
+
     struct cio_ctx *ctx;      /* library context      */
     struct cio_stream *st;    /* stream context       */
     struct mk_list _head;     /* head link to stream->files */

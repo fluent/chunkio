@@ -27,6 +27,7 @@
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_file.h>
 #include <chunkio/cio_log.h>
+#include <chunkio/cio_sha1.h>
 
 static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
 {
@@ -122,11 +123,13 @@ int cio_scan_streams(struct cio_ctx *ctx)
 
 void cio_scan_dump(struct cio_ctx *ctx)
 {
+    char *p;
+    char hash[41];
+    char tmp[PATH_MAX];
     struct mk_list *head;
     struct mk_list *f_head;
     struct cio_stream *st;
     struct cio_file *cf;
-    char tmp[PATH_MAX];
 
     cio_log_info(ctx, "scan dump of %s", ctx->root_path);
 
@@ -138,9 +141,13 @@ void cio_scan_dump(struct cio_ctx *ctx)
         mk_list_foreach(f_head, &st->files) {
             cf = mk_list_entry(f_head, struct cio_file, _head);
             snprintf(tmp, sizeof(tmp) -1, "%s/%s", st->name, cf->name);
+
+            p = cio_file_st_get_hash(cf->map);
+            cio_sha1_to_hex(p, hash);
+
             printf("        %-60s", tmp);
-            printf("alloc_size=%lu, data_size=%lu\n",
-                   cf->alloc_size, cf->data_size);
+            printf("alloc_size=%lu, data_size=%lu, hash=%s\n",
+                   cf->alloc_size, cf->data_size, hash);
         }
     }
 }
