@@ -63,6 +63,8 @@ struct cio_ctx *cio_create(const char *root_path,
         return NULL;
     }
 
+    cio_page_size = getpagesize();
+
     /* Create context */
     ctx = calloc(1, sizeof(struct cio_ctx));
     if (!ctx) {

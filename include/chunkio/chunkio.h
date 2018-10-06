@@ -32,8 +32,10 @@
 #define CIO_DEBUG  4
 
 /* flags */
-#define CIO_OPEN    1   /* open/create file reference */
-#define CIO_OPEN_RD 2   /* open and read/mmap content if exists */
+#define CIO_OPEN        1   /* open/create file reference */
+#define CIO_OPEN_RD     2   /* open and read/mmap content if exists */
+
+int cio_page_size;
 
 struct cio_ctx {
     char *root_path;
