@@ -22,6 +22,7 @@
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_sha1.h>
+#include <chunkio/cio_scan.h>
 #include <chunkio/cio_file.h>
 #include <chunkio/cio_stream.h>
 
@@ -100,7 +101,7 @@ static void test_fs_write()
     utils_recursive_delete(env);
 
     /* Create main context */
-    ctx = cio_create(env, log_cb, CIO_DEBUG);
+    ctx = cio_create(env, log_cb, CIO_INFO);
     TEST_CHECK(ctx != NULL);
 
     /* Try to create a file with an invalid stream */
@@ -134,20 +135,22 @@ static void test_fs_write()
     cio_sha1_hash(in_data, in_size, hash_sha1);
     cio_sha1_to_hex(hash_sha1, (char *) hex_sha1);
 
-    for (i = 0; i < 1000; i++) {
+    for (i = 0; i < 10; i++) {
         snprintf(tmp, sizeof(tmp), "api-test-%04i.txt", i);
-        farr[i] = cio_file_open(ctx, stream, tmp, CIO_OPEN, 1 + i);
+        farr[i] = cio_file_open(ctx, stream, tmp, CIO_OPEN, 1000000);
 
-        int x;
-        for (x = 0; x < in_size; x++) {
-            cio_file_write(farr[i], in_data + x, 1);
-        }
-
+        cio_file_write(farr[i], in_data, in_size);
         cio_file_sync(farr[i]);
     }
 
     /* Release file data and destroy context */
     munmap(in_data, in_size);
+    cio_destroy(ctx);
+
+    /* Create new context using the data generated above */
+    ctx = cio_create(env, log_cb, CIO_INFO);
+    TEST_CHECK(ctx != NULL);
+    cio_scan_dump(ctx);
     cio_destroy(ctx);
 }
 
