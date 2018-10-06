@@ -25,7 +25,10 @@ foreach(source_file ${UNIT_TESTS_FILES})
     ${utils}
     )
   target_link_libraries(${source_file_we} chunkio-static)
-  add_sanitizers(${source_file_we})
+
+  if (CIO_SANITIZE_ADDRESS)
+    add_sanitizers(${source_file_we})
+  endif()
 
   add_test(${source_file_we} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${source_file_we})
 endforeach()

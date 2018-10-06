@@ -23,7 +23,6 @@ endmacro()
 # Development/Test mode
 if(CIO_DEV)
   CIO_OPTION(CMAKE_BUILD_TYPE      "Debug")
-  CIO_OPTION(CIO_SANITIZE_ADDRESS       On)
   CIO_OPTION(CIO_TESTS                  On)
   CIO_OPTION(CIO_LIB_STATIC             On)
 endif()
