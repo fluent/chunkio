@@ -34,6 +34,7 @@
 /* flags */
 #define CIO_OPEN        1   /* open/create file reference */
 #define CIO_OPEN_RD     2   /* open and read/mmap content if exists */
+#define CIO_HASH_CHECK  4   /* enable hash verification (sha1) */
 
 int cio_page_size;
 
