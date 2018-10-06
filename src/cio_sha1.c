@@ -20,6 +20,7 @@
 /* Just a simple wrapper over sha1 routines */
 
 #include <stdio.h>
+#include <string.h>
 #include <chunkio/cio_sha1.h>
 
 void cio_sha1_init(struct cio_sha1 *ctx)
@@ -38,11 +39,20 @@ void cio_sha1_final(unsigned char hash[20], struct cio_sha1 *ctx)
 }
 
 void cio_sha1_hash(const void *data_in, unsigned long length,
-                   unsigned char *data_out)
+                   unsigned char *data_out, void *state)
 {
     SHA_CTX sha;
     SHA1_Init(&sha);
     SHA1_Update(&sha, data_in, length);
+
+    /*
+     * If state is not NULL, make a copy of the SHA context for future
+     * iterations and updates.
+     */
+    if (state != NULL) {
+        memcpy(state, &sha, sizeof(SHA_CTX));
+    }
+
     SHA1_Final(data_out, &sha);
 }
 
