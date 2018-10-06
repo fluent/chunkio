@@ -21,6 +21,7 @@
 #define CIO_FILE_H
 
 #include <chunkio/cio_file_st.h>
+#include <chunkio/cio_sha1.h>
 
 struct cio_file {
     int fd;                   /* file descriptor      */
@@ -36,6 +37,7 @@ struct cio_file {
 
     /* cached addr */
     char *st_content;
+    struct cio_sha1 sha_cur;  /* temporal sha1 ctx for updates */
 
     struct cio_ctx *ctx;      /* library context      */
     struct cio_stream *st;    /* stream context       */
@@ -51,5 +53,7 @@ void cio_file_close(struct cio_file *cf);
 int cio_file_write(struct cio_file *cf, const void *buf, size_t count);
 int cio_file_sync(struct cio_file *cf);
 int cio_file_close_stream(struct cio_stream *st);
+char *cio_file_hash(struct cio_file *cf);
+void cio_file_hash_print(struct cio_file *cf);
 
 #endif

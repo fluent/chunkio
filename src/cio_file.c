@@ -37,53 +37,80 @@
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
 
-char cio_file_sha1_default[] =   {                              \
-    0xad, 0x03, 0x9f, 0xc0, 0xeb,                               \
-    0x11, 0x9a, 0xf8, 0x3a, 0xe8,                               \
-    0x7d, 0x19, 0x85, 0x57, 0x0d,                               \
-    0x84, 0xd8, 0x84, 0x4c, 0xc2                                \
+
+char cio_file_init_bytes[] =   {
+    CIO_FILE_ID_00, CIO_FILE_ID_01,     /* file type (2 bytes)    */
+    0x14, 0x89, 0xf9, 0x23, 0xc4,       /* sha1 (20 bytes)        */
+    0xdc, 0xa7, 0x29, 0x17, 0x8b,
+    0x3e, 0x32, 0x33, 0x45, 0x85,
+    0x50, 0xd8, 0xdd, 0xdf, 0x29,
+    0x00, 0x00                          /* metadata len (2 bytes) */
 };
 
 #define round_up(a, b)  (a + (b - (a % b)))
 
-/* Calculate SHA1 into variable */
-static void get_hash(struct cio_file *cf, char *out)
+/* Get the number of bytes in the Content section */
+static size_t content_len(struct cio_file *cf)
 {
-    size_t content_len;
+    int meta;
+    size_t len;
     void *in_data;
 
-    in_data = cf->map + CIO_FILE_CONTENT_OFFSET;
-    content_len = cf->alloc_size - cf->data_size - 24;
+    meta = cio_file_st_get_meta_len(cf->map);
+    len = 2 + meta + cf->data_size;
 
-    cio_sha1_hash(in_data, content_len, (unsigned char *) out);
+    return len;
+}
+
+/* Calculate SHA1 into variable */
+static void get_hash(struct cio_file *cf, char *out, struct cio_sha1 *state)
+{
+    size_t len;
+    void *in_data;
+
+    len = content_len(cf);
+    in_data = cf->map + CIO_FILE_CONTENT_OFFSET;
+    cio_sha1_hash(in_data, len, (unsigned char *) out, state);
 }
 
 /* Update SHA1 hash into memory map */
 static void write_hash(struct cio_file *cf)
 {
-    size_t content_len;
+    size_t len;
     void *in_data;
 
+    len = content_len(cf);
     in_data = cf->map + CIO_FILE_CONTENT_OFFSET;
-    content_len = cf->alloc_size - cf->data_size - 24;
-
-    cio_sha1_hash(in_data, content_len, (unsigned char *) (cf->map + 2));
+    cio_sha1_hash(in_data, len, (unsigned char *) (cf->map + 2),
+                  &cf->sha_cur);
 }
 
-static void write_header(struct cio_file *cf)
+/* Update SHA1 hash into memory map */
+static void write_hash_from_context(struct cio_file *cf)
 {
-    char *p = cf->map;
+    size_t len;
+    void *in_data;
+    struct cio_sha1 sha;
 
-    p[0] = CIO_FILE_ID_00;
-    p[1] = CIO_FILE_ID_01;
+    /*
+     * make a backup of the context, since when invoking sha1_end() it
+     * will add some zeroes for padding. We need to keep the previous state
+     */
+    memcpy(&sha, &cf->sha_cur, sizeof(struct cio_sha1));
 
-    p = cio_file_st_get_meta_header(cf->map);
-    *p++ = 0;
-    *p++ = 0;
+    len = content_len(cf);
+    in_data = cf->map + CIO_FILE_CONTENT_OFFSET;
 
-    /* Write default sha1 hash */
-    p = cf->map + 2;
-    memcpy(p, cio_file_sha1_default, 20);
+    cio_sha1_hash(in_data, len, (unsigned char *) (cf->map + 2),
+                  &cf->sha_cur);
+
+    /* restore context (before padding) */
+    memcpy(&cf->sha_cur, &sha, sizeof(struct cio_sha1));
+}
+
+static void write_init_header(struct cio_file *cf)
+{
+    memcpy(cf->map, cio_file_init_bytes, sizeof(cio_file_init_bytes));
 }
 
 /* Return the available size in the file map to write data */
@@ -114,7 +141,7 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
     /* If the file is empty, put the structure on it */
     if (cf->data_size == 0) {
         /* check we have write permissions */
-        if (cf->flags & ~CIO_OPEN) {
+        if ((cf->flags & CIO_OPEN) == 0) {
             cio_log_warn(cf->ctx,
                          "[cio file] cannot initialize chunk (read-only)");
             return -1;
@@ -126,7 +153,8 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
             return -1;
         }
 
-        write_header(cf);
+        /* Initialize init bytes */
+        write_init_header(cf);
     }
     else {
         /* Check first two bytes */
@@ -140,13 +168,15 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
         p = cio_file_st_get_hash(cf->map);
 
         /* Calculate hash from the data */
-        get_hash(cf, hash);
+        get_hash(cf, hash, &cf->sha_cur);
 
         /* Compare */
-        if (memcmp(p, hash, 20) != 0) {
-            cio_log_debug(cf->ctx, "[cio file] invalid sha1 at %s",
-                          cf->name);
-            return -1;
+        if (cf->flags & CIO_HASH_CHECK) {
+            if (memcmp(p, hash, 20) != 0) {
+                cio_log_debug(cf->ctx, "[cio file] invalid sha1 at %s",
+                              cf->name);
+                return -1;
+            }
         }
     }
 
@@ -415,6 +445,8 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
     }
 
     memcpy(cf->st_content + cf->data_size, buf, count);
+    cio_sha1_update(&cf->sha_cur, buf, count);
+
     cf->data_size += count;
     cf->synced = CIO_FALSE;
 
@@ -461,6 +493,9 @@ int cio_file_sync(struct cio_file *cf)
         }
     }
 
+    /* Update hash using previous context to avoid calculation of prev bytes */
+    write_hash_from_context(cf);
+
     /* Commit changes to disk */
     ret = msync(cf->map, cf->alloc_size, MS_SYNC);
     if (ret == -1) {
@@ -493,4 +528,19 @@ int cio_file_close_stream(struct cio_stream *st)
     }
 
     return 0;
+}
+
+char *cio_file_hash(struct cio_file *cf)
+{
+    return (cf->map + 2);
+}
+
+void cio_file_hash_print(struct cio_file *cf)
+{
+    char *h;
+    char out[41];
+
+    h = cio_file_hash(cf);
+    cio_sha1_to_hex(h, out);
+    printf("%s\n", out);
 }
