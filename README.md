@@ -50,6 +50,33 @@ the command above specify to gather data from the standard input (_-i_), use a s
 
 ```
 
+## File Layout
+
+Each file created by the library have the following layout:
+
+```
++--------------+----------------+
+|     0xC1     |     0x00       +--> Header 2 bytes
++--------------+----------------+
+|           20 BYTES            +--> SHA1(Content)
++-------------------------------+
+|            Content            |
+|  +-------------------------+  |
+|  |         2 BYTES         +-----> Metadata Length
+|  +-------------------------+  |
+|  +-------------------------+  |
+|  |                         |  |
+|  |        Metadata         +-----> Optional Metadata (up to 65535 bytes)
+|  |                         |  |
+|  +-------------------------+  |
+|  +-------------------------+  |
+|  |                         |  |
+|  |       Content Data      +-----> User Data
+|  |                         |  |
+|  +-------------------------+  |
++-------------------------------+
+```
+
 ## TODO
 
 - [ ] Document C API: dev is still in progress, so constant changes are expected
