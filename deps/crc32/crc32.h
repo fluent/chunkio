@@ -2,7 +2,7 @@
  * \file
  * Functions and types for CRC checks.
  *
- * Generated on Fri Oct 26 19:53:47 2018
+ * Generated on Tue Oct 30 22:09:48 2018
  * by pycrc v0.9.1, https://pycrc.org
  * using the configuration:
  *  - Width         = 32
@@ -12,6 +12,7 @@
  *  - XorOut        = 0xffffffff
  *  - ReflectOut    = True
  *  - Algorithm     = table-driven
+ *  - SliceBy       = 8
  *
  * This file defines the functions crc_init(), crc_update() and crc_finalize().
  *
