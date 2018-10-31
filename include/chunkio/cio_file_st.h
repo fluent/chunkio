@@ -24,10 +24,10 @@
 #include <inttypes.h>
 
 /*
- * ChunkIO data file layout as of 2018/10/05
+ * ChunkIO data file layout as of 2018/10/26
  *
- * -  2 first bytes as identification: 0xC1 0x00
- * - 20 bytes of sha1 hash of content section
+ * - 2 first bytes as identification: 0xC1 0x00
+ * - 4 bytes for checksum of content section (CRC32)
  * - Content section is composed by:
  *   - 2 bytes to specify the length of metadata
  *   - optional metadata
@@ -36,7 +36,7 @@
  *    +--------------+----------------+
  *    |     0xC1     |     0x00       +--> Header 2 bytes
  *    +--------------+----------------+
- *    |           20 BYTES            +--> SHA1(Content)
+ *    |   4 BYTES CRC32 + 16 BYTES    +--> CRC32(Content) + Padding
  *    +-------------------------------+
  *    |            Content            |
  *    |  +-------------------------+  |
@@ -64,12 +64,6 @@
 static inline char *cio_file_st_get_hash(char *map)
 {
     return map + 2;
-}
-
-/* Return pointer to metadata header */
-static inline char *cio_file_st_get_meta_header(char *map)
-{
-    return map + 22;
 }
 
 /* Return metadata length */

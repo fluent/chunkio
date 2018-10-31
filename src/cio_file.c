@@ -23,28 +23,35 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/mman.h>
+#include <arpa/inet.h>
 
 #include <chunkio/chunkio.h>
-#include <chunkio/cio_sha1.h>
+#include <chunkio/cio_crc32.h>
 #include <chunkio/cio_file.h>
 #include <chunkio/cio_file_st.h>
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
 
-
 char cio_file_init_bytes[] =   {
-    CIO_FILE_ID_00, CIO_FILE_ID_01,     /* file type (2 bytes)    */
-    0x14, 0x89, 0xf9, 0x23, 0xc4,       /* sha1 (20 bytes)        */
-    0xdc, 0xa7, 0x29, 0x17, 0x8b,
-    0x3e, 0x32, 0x33, 0x45, 0x85,
-    0x50, 0xd8, 0xdd, 0xdf, 0x29,
-    0x00, 0x00                          /* metadata len (2 bytes) */
+    /* file type (2 bytes)    */
+    CIO_FILE_ID_00, CIO_FILE_ID_01,
+
+    /* crc32 (4 bytes) in network byte order */
+    0xff, 0x12, 0xd9, 0x41,
+
+    /* padding bytes (we have 16 extra bytes */
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00,
+
+    /* metadata length (2 bytes) */
+    0x00, 0x00
 };
 
 #define round_up(a, b)  (a + (b - (a % b)))
@@ -58,54 +65,43 @@ static size_t content_len(struct cio_file *cf)
 
     meta = cio_file_st_get_meta_len(cf->map);
     len = 2 + meta + cf->data_size;
-
     return len;
 }
 
-/* Calculate SHA1 into variable */
-static void get_hash(struct cio_file *cf, char *out, struct cio_sha1 *state)
+/* Calculate content checksum in a variable */
+static void calculate_checksum(struct cio_file *cf, crc_t *out)
 {
+    crc_t val;
     size_t len;
-    void *in_data;
+    unsigned char *in_data;
 
     len = content_len(cf);
     in_data = cf->map + CIO_FILE_CONTENT_OFFSET;
-    cio_sha1_hash(in_data, len, (unsigned char *) out, state);
+
+    val = cio_crc32_update(cf->crc_cur, in_data, len);
+    *out = val;
 }
 
-/* Update SHA1 hash into memory map */
-static void write_hash(struct cio_file *cf)
+/* Update crc32 checksum into the memory map */
+static void update_checksum(struct cio_file *cf,
+                            unsigned char *data, size_t len)
 {
-    size_t len;
+    crc_t crc;
     void *in_data;
 
-    len = content_len(cf);
-    in_data = cf->map + CIO_FILE_CONTENT_OFFSET;
-    cio_sha1_hash(in_data, len, (unsigned char *) (cf->map + 2),
-                  &cf->sha_cur);
+    crc = cio_crc32_update(cf->crc_cur, data, len);
+    memcpy(cf->map + 2, &crc, sizeof(crc));
+    cf->crc_cur = crc;
 }
 
-/* Update SHA1 hash into memory map */
-static void write_hash_from_context(struct cio_file *cf)
+/* Finalize CRC32 context and update the memory map */
+static void finalize_checksum(struct cio_file *cf)
 {
-    size_t len;
-    void *in_data;
-    struct cio_sha1 sha;
+    crc_t crc;
 
-    /*
-     * make a backup of the context, since when invoking sha1_end() it
-     * will add some zeroes for padding. We need to keep the previous state
-     */
-    memcpy(&sha, &cf->sha_cur, sizeof(struct cio_sha1));
-
-    len = content_len(cf);
-    in_data = cf->map + CIO_FILE_CONTENT_OFFSET;
-
-    cio_sha1_hash(in_data, len, (unsigned char *) (cf->map + 2),
-                  &cf->sha_cur);
-
-    /* restore context (before padding) */
-    memcpy(&cf->sha_cur, &sha, sizeof(struct cio_sha1));
+    crc = cio_crc32_finalize(cf->crc_cur);
+    crc = htonl(crc);
+    memcpy(cf->map + 2, &crc, sizeof(crc));
 }
 
 static void write_init_header(struct cio_file *cf)
@@ -134,12 +130,13 @@ static size_t get_available_size(struct cio_file *cf)
 static int cio_file_format_check(struct cio_file *cf, int flags)
 {
     char *p;
-    char hash[20];
+    crc_t crc_check;
+    crc_t crc;
 
     p = cf->map;
 
     /* If the file is empty, put the structure on it */
-    if (cf->data_size == 0) {
+    if (cf->fs_size == 0) {
         /* check we have write permissions */
         if ((cf->flags & CIO_OPEN) == 0) {
             cio_log_warn(cf->ctx,
@@ -155,6 +152,9 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
 
         /* Initialize init bytes */
         write_init_header(cf);
+
+        /* Write checksum in context (note: crc32 not finalized) */
+        calculate_checksum(cf, &cf->crc_cur);
     }
     else {
         /* Check first two bytes */
@@ -167,16 +167,19 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
         /* Get hash stored in the mmap */
         p = cio_file_st_get_hash(cf->map);
 
-        /* Calculate hash from the data */
-        get_hash(cf, hash, &cf->sha_cur);
+        /* Calculate data checksum in variable */
+        calculate_checksum(cf, &crc);
 
-        /* Compare */
+        /* Compare checksum */
         if (cf->flags & CIO_HASH_CHECK) {
-            if (memcmp(p, hash, 20) != 0) {
-                cio_log_debug(cf->ctx, "[cio file] invalid sha1 at %s",
+            crc_check = cio_crc32_finalize(crc);
+            crc_check = htonl(crc_check);
+            if (memcmp(p, &crc_check, sizeof(crc_check)) != 0) {
+                cio_log_debug(cf->ctx, "[cio file] invalid crc32 at %s",
                               cf->name);
                 return -1;
             }
+            cf->crc_cur = crc;
         }
     }
 
@@ -260,6 +263,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     cf->st = st;
     cf->realloc_size = getpagesize() * 8;
     cf->st_content = NULL;
+    cf->crc_cur = cio_crc32_init();
 
     cf->name = strdup(name);
     if (!cf->name) {
@@ -340,16 +344,18 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
 
     /* check content data size */
     if (fs_size > 0) {
-        content_size = cio_file_st_get_content_size(cf->map, size);
+        content_size = cio_file_st_get_content_size(cf->map, fs_size);
         if (content_size == -1) {
             cio_log_error(ctx, "invalid content size %s", path);
             cio_file_close(cf);
             return NULL;
         }
         cf->data_size = content_size;
+        cf->fs_size = fs_size;
     }
     else {
         cf->data_size = 0;
+        cf->fs_size = 0;
     }
 
     cio_file_format_check(cf, flags);
@@ -444,8 +450,8 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
         cf->st_content = cio_file_st_get_content(cf->map);
     }
 
+    update_checksum(cf, (unsigned char *) buf, count);
     memcpy(cf->st_content + cf->data_size, buf, count);
-    cio_sha1_update(&cf->sha_cur, buf, count);
 
     cf->data_size += count;
     cf->synced = CIO_FALSE;
@@ -464,13 +470,17 @@ int cio_file_sync(struct cio_file *cf)
         return 0;
     }
 
+    if (cf->synced == CIO_TRUE) {
+        return 0;
+    }
+
     ret = fstat(cf->fd, &fst);
     if (ret == -1) {
         cio_errno();
         return -1;
     }
 
-    /* If there extra space, truncate the file size */
+    /* If there are extra space, truncate the file size */
     av_size = get_available_size(cf);
     if (av_size > 0) {
         size = cf->alloc_size - av_size;
@@ -493,11 +503,11 @@ int cio_file_sync(struct cio_file *cf)
         }
     }
 
-    /* Update hash using previous context to avoid calculation of prev bytes */
-    write_hash_from_context(cf);
+    /* Finalize CRC32 checksum */
+    finalize_checksum(cf);
 
     /* Commit changes to disk */
-    ret = msync(cf->map, cf->alloc_size, MS_SYNC);
+    ret = msync(cf->map, cf->alloc_size, MS_ASYNC);
     if (ret == -1) {
         cio_errno();
         return -1;
@@ -537,10 +547,6 @@ char *cio_file_hash(struct cio_file *cf)
 
 void cio_file_hash_print(struct cio_file *cf)
 {
-    char *h;
-    char out[41];
-
-    h = cio_file_hash(cf);
-    cio_sha1_to_hex(h, out);
-    printf("%s\n", out);
+    printf("crc cur=%lu\n", cf->crc_cur);
+    printf("%08lx\n", (long unsigned int ) cf->crc_cur);
 }

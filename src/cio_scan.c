@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <arpa/inet.h>
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_stream.h>
@@ -143,11 +144,14 @@ void cio_scan_dump(struct cio_ctx *ctx)
             snprintf(tmp, sizeof(tmp) -1, "%s/%s", st->name, cf->name);
 
             p = cio_file_st_get_hash(cf->map);
-            cio_sha1_to_hex(p, hash);
+            crc_t val;
+
+            memcpy(&val, p, sizeof(val));
+            val = ntohl(val);
 
             printf("        %-60s", tmp);
-            printf("alloc_size=%lu, data_size=%lu, hash=%s\n",
-                   cf->alloc_size, cf->data_size, hash);
+            printf("alloc_size=%lu, data_size=%lu, crc=%08x\n",
+                   cf->alloc_size, cf->data_size, (uint32_t) val);
         }
     }
 }

@@ -21,13 +21,14 @@
 #define CIO_FILE_H
 
 #include <chunkio/cio_file_st.h>
-#include <chunkio/cio_sha1.h>
+#include <chunkio/cio_crc32.h>
 
 struct cio_file {
     int fd;                   /* file descriptor      */
     int flags;                /* open flags */
     int synced;               /* sync after latest write ? */
     int mapped;               /* is the file content mapped ? */
+    size_t fs_size;           /* original size in the file system */
     size_t data_size;         /* number of bytes used */
     size_t alloc_size;        /* allocated size       */
     size_t realloc_size;      /* chunk size to increase alloc */
@@ -37,7 +38,7 @@ struct cio_file {
 
     /* cached addr */
     char *st_content;
-    struct cio_sha1 sha_cur;  /* temporal sha1 ctx for updates */
+    crc_t crc_cur;
 
     struct cio_ctx *ctx;      /* library context      */
     struct cio_stream *st;    /* stream context       */
