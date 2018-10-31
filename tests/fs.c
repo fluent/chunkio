@@ -18,6 +18,7 @@
  */
 
 #include <sys/mman.h>
+#include <arpa/inet.h>
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_log.h>
@@ -85,6 +86,7 @@ static void test_fs_write()
 {
     int i;
     int ret;
+    int n_files = 100;
     char *in_data;
     size_t in_size;
     char tmp[255];
@@ -93,7 +95,7 @@ static void test_fs_write()
     struct cio_ctx *ctx;
     struct cio_stream *stream;
     struct cio_file *file;
-    struct cio_file *farr[1000];
+    struct cio_file **farr;
 
     /* Dummy break line for clarity on acutest output */
     printf("\n");
@@ -132,20 +134,36 @@ static void test_fs_write()
         exit(EXIT_FAILURE);
     }
 
-    /* Data file sha1 */
-    cio_sha1_hash(in_data, in_size, hash_sha1, NULL);
-    cio_sha1_to_hex(hash_sha1, (char *) hex_sha1);
+    /* Number of test files to create */
+    n_files = 1000;
 
-    for (i = 0; i < 10; i++) {
+    /* Allocate files array */
+    farr = calloc(1, sizeof(struct cio_file) * n_files);
+    if (!farr) {
+        perror("calloc");
+        exit(EXIT_FAILURE);
+    }
+
+    for (i = 0; i < n_files; i++) {
         snprintf(tmp, sizeof(tmp), "api-test-%04i.txt", i);
         farr[i] = cio_file_open(ctx, stream, tmp,
                                 CIO_OPEN | CIO_HASH_CHECK, 1000000);
 
+        if (farr[i] == NULL) {
+            continue;
+        }
+
         cio_file_write(farr[i], in_data, in_size);
+        cio_file_write(farr[i], in_data, in_size);
+        cio_file_write(farr[i], in_data, in_size);
+        cio_file_write(farr[i], in_data, in_size);
+        cio_file_write(farr[i], in_data, in_size);
+
         cio_file_sync(farr[i]);
     }
 
     /* Release file data and destroy context */
+    free(farr);
     munmap(in_data, in_size);
     cio_destroy(ctx);
 
@@ -160,29 +178,37 @@ static void test_fs_write()
  * Create one file chunk and check it updated sha1 after a couple of writes
  * and sync.
  */
-static void test_sha_check()
+static void test_fs_checksum()
 {
     int ret;
     char *in_data;
     char *f_hash;
     size_t in_size;
+    crc_t crc;
+    uint32_t val;
     struct cio_ctx *ctx;
     struct cio_stream *stream;
     struct cio_file *file;
 
-    /* sha1 hashes */
-    char sha_test1[] =  {
-        0x14, 0x89, 0xf9, 0x23, 0xc4,
-        0xdc, 0xa7, 0x29, 0x17, 0x8b,
-        0x3e, 0x32, 0x33, 0x45, 0x85,
-        0x50, 0xd8, 0xdd, 0xdf, 0x29
+    /*
+     * crc32 checksums
+     * ===============
+     */
+
+    /* Empty file */
+    char crc32_test1[] =  {
+        0xff, 0x12, 0xd9, 0x41, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00
     };
 
-    char sha_test2[] = {
-        0x62, 0x4f, 0x06, 0x04, 0x38,
-        0xc8, 0x17, 0x3c, 0x91, 0x5c,
-        0x26, 0xca, 0xbc, 0x5d, 0x47,
-        0x4b, 0x6f, 0x71, 0xea, 0xaf
+    /* CRC32 of 2 zero bytes + content of data/400kb.txt file */
+    char crc32_test2[] = {
+        0x67, 0xfa, 0x3c, 0x10, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00
     };
 
     /* Dummy break line for clarity on acutest output */
@@ -194,7 +220,7 @@ static void test_sha_check()
     ctx = cio_create(CIO_ENV, log_cb, CIO_INFO);
     TEST_CHECK(ctx != NULL);
 
-    stream = cio_stream_create(ctx, "test-sha1");
+    stream = cio_stream_create(ctx, "test-crc32");
     TEST_CHECK(stream != NULL);
 
     /* Load sample data file in memory */
@@ -209,23 +235,27 @@ static void test_sha_check()
      * Test 1:
      *  - create one empty file
      *  - sync
-     *  - validate sha_test1
+     *  - validate crc32_test1
      */
     file = cio_file_open(ctx, stream, "test1.out",
                          CIO_OPEN | CIO_HASH_CHECK, 10);
+
+    /* Check default crc32() for an empty file after sync */
+    f_hash = cio_file_hash(file);
     cio_file_sync(file);
 
-    /* Check default sha1() for an empty file after msync(2) */
-    f_hash = cio_file_hash(file);
-    ret = memcmp(f_hash, sha_test1, 20);
+    memcpy(&val, f_hash, sizeof(val));
+    val = ntohl(val);
+
+    ret = memcmp(&val, crc32_test1, 4);
     TEST_CHECK(ret == 0);
 
     /*
      * Test 2:
      *  - append content of 400kb.txt file to file context
-     *  - validate file sha1 in mem is the same as sha_test1
+     *  - validate file crc32 in mem is the same as crc_test1
      *  - sync
-     *  - validate file sha1 in mem is equal to sha_test2
+     *  - validate file crc32 in mem is equal to sha_test2
      *
      * note that the second sha1 calculation is done using the initial
      * sha1 context so it skip old data to perform the verification.
@@ -234,7 +264,10 @@ static void test_sha_check()
     cio_file_sync(file);
 
     f_hash = cio_file_hash(file);
-    ret = memcmp(f_hash, sha_test2, 20);
+    memcpy(&val, f_hash, sizeof(val));
+    val = ntohl(val);
+
+    ret = memcmp(&val, crc32_test2, 4);
     TEST_CHECK(ret == 0);
 
     /* Release */
@@ -244,6 +277,6 @@ static void test_sha_check()
 
 TEST_LIST = {
     {"fs_write",   test_fs_write},
-    {"sha_check",  test_sha_check},
+    {"fs_checksum",  test_fs_checksum},
     { 0 }
 };
