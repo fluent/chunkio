@@ -6,7 +6,7 @@ Chunk I/O is a library to manage chunks of data in the file system and load in m
 - Streams: categorize data into streams
 - Multiple data files per stream
 - Data file or chunks are composed by:
-  - SHA1 content digest (optional)
+  - Optional CRC32 content checksum. CRC32 is stored in network-byte-order (big-endian)
   - Metadata (optional, up to 65535 bytes)
   - User data
 
@@ -41,7 +41,7 @@ Each chunk file created by the library have the following layout:
 +--------------+----------------+
 |     0xC1     |     0x00       +--> Header 2 bytes
 +--------------+----------------+
-|           20 BYTES            +--> SHA1(Content)
+|    4 BYTES CRC32 + 16 BYTES   +--> CRC32(Content) + Padding
 +-------------------------------+
 |            Content            |
 |  +-------------------------+  |
@@ -65,7 +65,7 @@ Each chunk file created by the library have the following layout:
 This repository provides a client tool called _cio_ for testing and managing purposes. a quick start for testing could be to stream a file over STDIN and flush it under a specific stream and chunk name, e.g:
 
 ```bash
-$ cat somefile | tools/cio -i -s stdin -f data -vvv
+$ cat somefile | tools/cio -i -s stdin -f somefile -vvv
 ```
 
 the command above specify to gather data from the standard input (_-i_), use a stream called _stdin_ (_-s stdin_) and store the data into the chunk called _data_ (_-f data_)  and enabling some verbose messages (_-vvv_)
@@ -86,7 +86,7 @@ now that the chunk file has been generated you can list the content with the _-l
 ```bash
 $ tools/cio -l
  stream:stdin                 1 chunks
-        stdin/somefile        alloc_size=4096, data_size=4072, hash=e9edd0e9dd...
+        stdin/somefile        alloc_size=4096, data_size=4072, crc=6dd73d2e
 ```
 
 ## TODO
