@@ -31,6 +31,8 @@
 #include <sys/mman.h>
 #include <errno.h>
 
+#include <chunkio/cio_log.h>
+
 /*
  * Taken from StackOverflow:
  *
@@ -42,6 +44,12 @@ int cio_utils_recursive_delete(const char *dir)
     FTS *ftsp = NULL;
     FTSENT *curr;
     char *files[] = { (char *) dir, NULL };
+    struct stat st;
+
+    ret = stat(dir, &st);
+    if (ret == -1) {
+        return -1;
+    }
 
     ftsp = fts_open(files, FTS_NOCHDIR | FTS_PHYSICAL | FTS_XDEV, NULL);
     if (!ftsp) {
