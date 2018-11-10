@@ -23,9 +23,12 @@
 #include <getopt.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/time.h>
 #include <pwd.h>
 #include <limits.h>
 #include <signal.h>
+#include <time.h>
 
 #define ANSI_RESET "\033[0m"
 #define ANSI_BOLD  "\033[1m"
@@ -51,11 +54,16 @@
     write (STDERR_FILENO, #X ")\n" , sizeof(#X ")\n")-1); \
     break;
 
+#define CIO_PERF_PATH      "/tmp/cio-perf/"
+
+#define ONESEC_IN_NSEC     1000000000
+
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_file.h>
 #include <chunkio/cio_scan.h>
+#include <chunkio/cio_utils.h>
 
 static void cio_help(int rc)
 {
@@ -64,6 +72,12 @@ static void cio_help(int rc)
     printf("  -r, --root[=PATH]\tset root path\n");
     printf("  -i, --stdin\t\tdump stdin data to stream/file\n");
     printf("  -s, --stream=STREAM\tset stream name\n");
+    printf("  -l, --list\t\tlist environment content\n");
+    printf("  -F, --full-sync\tforce data flush to disk\n");
+    printf("  -k, --checksum\tenable CRC32 checksum\n");
+    printf("  -p, --perf=FILE\trun performance test\n");
+    printf("  -w, --writes=N\tset number of writes for performance mode "
+           "(default: 5)\n");
     printf("  -h, --help\t\tprint this help\n");
     exit(rc);
 }
@@ -250,14 +264,139 @@ static int cb_cmd_stdin(struct cio_ctx *ctx, const char *stream,
     return 0;
 }
 
+static double time_to_double(struct timespec *t)
+{
+    return (double)(t->tv_sec) + ((double)t->tv_nsec/(double) ONESEC_IN_NSEC);
+}
+
+static int time_diff(struct timespec *tm0, struct timespec *tm1,
+                     struct timespec *out)
+{
+
+    if (tm1->tv_sec >= tm0->tv_sec) {
+        out->tv_sec = tm1->tv_sec - tm0->tv_sec;
+        if (tm1->tv_nsec >= tm0->tv_nsec) {
+            out->tv_nsec = tm1->tv_nsec - tm0->tv_nsec;
+        }
+        else if(tm0->tv_sec == 0){
+            /* underflow */
+            return -1;
+        }
+        else{
+            out->tv_nsec = ONESEC_IN_NSEC \
+                + tm1->tv_nsec - tm0->tv_nsec;
+            out->tv_sec--;
+        }
+    }
+    else {
+        /* underflow */
+        return -1;
+    }
+
+    return 0;
+}
+
+static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile, int writes)
+{
+    int i;
+    int j;
+    int ret;
+    int n_files = 100;
+    int flags;
+    uint64_t bytes = 0;
+    double rate;
+    char *in_data;
+    size_t in_size;
+    char tmp[255];
+    char *perf_path = "/tmp/cio-perf/";
+    struct cio_stream *stream;
+    struct cio_file *file;
+    struct cio_file **farr;
+    struct timespec t1;
+    struct timespec t2;
+    struct timespec t_final;
+
+    /* Create pref stream */
+    stream = cio_stream_create(ctx, "test-perf");
+
+    /*
+     * Load sample data file and with the same content through multiple write
+     * operations generating other files.
+     */
+    ret = cio_utils_read_file(pfile, &in_data, &in_size);
+    if (ret == -1) {
+        cio_destroy(ctx);
+        exit(EXIT_FAILURE);
+    }
+
+    /* Number of test files to create */
+    n_files = 1000;
+
+    /* Allocate files array */
+    farr = calloc(1, sizeof(struct cio_file) * n_files);
+    if (!farr) {
+        perror("calloc");
+        exit(EXIT_FAILURE);
+    }
+
+    /* Perf-write test */
+    timespec_get(&t1, TIME_UTC);
+    for (i = 0; i < n_files; i++) {
+        snprintf(tmp, sizeof(tmp), "perf-test-%04i.txt", i);
+        farr[i] = cio_file_open(ctx, stream, tmp, CIO_OPEN, in_size);
+        if (farr[i] == NULL) {
+            continue;
+        }
+
+        for (j = 0; j < writes; j++) {
+            ret = cio_file_write(farr[i], in_data, in_size);
+            if (ret == -1) {
+                exit(5);
+            }
+        }
+
+        cio_file_sync(farr[i]);
+        bytes += (in_size * 5);
+    }
+    timespec_get(&t2, TIME_UTC);
+
+    /* Check timing */
+    time_diff(&t1, &t2, &t_final);
+
+    /*
+     * Write out the report
+     * ====================
+     */
+    cio_bytes_to_human_readable_size(bytes, tmp, sizeof(tmp) - 1);
+    printf("== perf write == \n");
+    printf("-  crc32 checksum : %s\n",
+           ctx->flags & CIO_CHECKSUM ? "enabled" : "disabled");
+    printf("-  fs sync mode   : %s\n",
+           ctx->flags & CIO_FULL_SYNC ? "full" : "normal");
+    printf("-  bytes written  : %s (%lu bytes)\n" , tmp, bytes);
+    printf("-  elapsed time   : %.2f seconds\n", time_to_double(&t_final));
+
+    rate = (double) (bytes / time_to_double(&t_final));
+    cio_bytes_to_human_readable_size(rate, tmp, sizeof(tmp) - 1);
+    printf("-  rate           : %s per second (%.2f bytes)\n", tmp, rate);
+
+    /* Release file data and destroy context */
+    free(farr);
+    munmap(in_data, in_size);
+}
+
 int main(int argc, char **argv)
 {
     int ret;
     int opt;
     int opt_silent = CIO_FALSE;
+    int opt_pwrites = 5;
     int cmd_stdin = CIO_FALSE;
     int cmd_list = CIO_FALSE;
-    int verbose = CIO_INFO;
+    int cmd_perf = CIO_FALSE;
+    int verbose = CIO_WARN;
+    int flags = 0;
+    char *perf_file = NULL;
     char *fname = NULL;
     char *stream = NULL;
     char *root_path = NULL;
@@ -265,11 +404,15 @@ int main(int argc, char **argv)
     struct cio_ctx *ctx;
 
     static const struct option long_opts[] = {
+        {"full-sync"  , no_argument      , NULL, 'f'},
+        {"checksum"   , no_argument      , NULL, 'k'},
         {"list"       , no_argument      , NULL, 'l'},
         {"root"       , required_argument, NULL, 'r'},
         {"silent"     , no_argument      , NULL, 'S'},
         {"stdin"      , no_argument      , NULL, 'i'},
         {"stream"     , required_argument, NULL, 's'},
+        {"perf"       , required_argument, NULL, 'p'},
+        {"perf-writes", required_argument, NULL, 'w'},
         {"verbose"    , no_argument      , NULL, 'v'},
         {"help"       , no_argument      , NULL, 'h'},
     };
@@ -277,9 +420,15 @@ int main(int argc, char **argv)
     /* Initialize signals */
     cio_signal_init();
 
-    while ((opt = getopt_long(argc, argv, "lr:Sis:f:vh",
+    while ((opt = getopt_long(argc, argv, "Fklr:p:w:Sis:f:vh",
                               long_opts, NULL)) != -1) {
         switch (opt) {
+        case 'F':
+            flags |= CIO_FULL_SYNC;
+            break;
+        case 'k':
+            flags |= CIO_CHECKSUM;
+            break;
         case 'l':
             cmd_list = CIO_TRUE;
             break;
@@ -288,6 +437,15 @@ int main(int argc, char **argv)
             break;
         case 'r':
             root_path = strdup(optarg);
+            break;
+        case 'p':
+            cio_utils_recursive_delete(CIO_PERF_PATH);
+            perf_file = strdup(optarg);
+            root_path = strdup(CIO_PERF_PATH);
+            cmd_perf = CIO_TRUE;
+            break;
+        case 'w':
+            opt_pwrites = atoi(optarg);
             break;
         case 'S':
             opt_silent = CIO_TRUE;
@@ -325,7 +483,7 @@ int main(int argc, char **argv)
     }
 
     /* Create CIO instance */
-    ctx = cio_create(root_path, log_cb, verbose);
+    ctx = cio_create(root_path, log_cb, verbose, flags);
     free(root_path);
 
     if (!ctx) {
@@ -353,6 +511,10 @@ int main(int argc, char **argv)
         }
 
         ret = cb_cmd_stdin(ctx, stream, fname);
+    }
+    else if (cmd_perf == CIO_TRUE) {
+        cb_cmd_perf(ctx, perf_file, opt_pwrites);
+        free(perf_file);
     }
     else {
         cio_help(EXIT_FAILURE);
