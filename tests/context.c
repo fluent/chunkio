@@ -40,23 +40,26 @@ static int log_cb(struct cio_ctx *ctx, const char *file, int line,
 /* Basic tests on context creation */
 static void test_context()
 {
+    int flags;
     struct cio_ctx *ctx;
 
+    flags = CIO_CHECKSUM;
+
     /* Invalid path */
-    ctx = cio_create("", NULL, CIO_INFO);
+    ctx = cio_create("", NULL, CIO_INFO, flags);
     TEST_CHECK(ctx == NULL);
 
     /* Invalid debug level -1 */
-    ctx = cio_create("/tmp/", NULL, -1);
+    ctx = cio_create("/tmp/", NULL, -1, flags);
     TEST_CHECK(ctx == NULL);
 
     /* Invalid debug level 5 */
-    ctx = cio_create("/tmp/", NULL, 5);
+    ctx = cio_create("/tmp/", NULL, 5, flags);
     TEST_CHECK(ctx == NULL);
 
     /* Valid context without callback */
     log_check = 0;
-    ctx = cio_create("/tmp/", NULL, CIO_INFO);
+    ctx = cio_create("/tmp/", NULL, CIO_INFO, flags);
     TEST_CHECK(ctx != NULL);
     cio_log_info(ctx, "test");
     TEST_CHECK(log_check == 0);
@@ -64,7 +67,7 @@ static void test_context()
 
     /* Valid with context callback */
     log_check = 0;
-    ctx = cio_create("/tmp/", log_cb, CIO_INFO);
+    ctx = cio_create("/tmp/", log_cb, CIO_INFO, flags);
     TEST_CHECK(ctx != NULL);
     cio_log_info(ctx, "test");
     TEST_CHECK(log_check == 1);
@@ -77,7 +80,7 @@ static void test_log_level()
 
     /* Logging with unset callback at creation, but set later */
     log_check = 0;
-    ctx = cio_create("/tmp/", NULL, CIO_INFO);
+    ctx = cio_create("/tmp/", NULL, CIO_INFO, 0);
     TEST_CHECK(ctx != NULL);
     cio_log_info(ctx, "test");
     TEST_CHECK(log_check == 0);

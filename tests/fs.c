@@ -22,10 +22,10 @@
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_log.h>
-#include <chunkio/cio_sha1.h>
 #include <chunkio/cio_scan.h>
 #include <chunkio/cio_file.h>
 #include <chunkio/cio_stream.h>
+#include <chunkio/cio_utils.h>
 
 #include "cio_tests_internal.h"
 
@@ -42,56 +42,16 @@ static int log_cb(struct cio_ctx *ctx, const char *file, int line,
     return 0;
 }
 
-static int read_file(const char *path, char **buf, size_t *size)
-{
-    int fd;
-    int ret;
-    char *data;
-    struct stat st;
-
-    fd = open(path, O_RDONLY);
-    if (fd == -1) {
-        perror("open");
-        return -1;
-    }
-
-    ret = fstat(fd, &st);
-    if (ret == -1) {
-        perror("fstat");
-        close(fd);
-        return -1;
-    }
-    if (!S_ISREG(st.st_mode)) {
-        close(fd);
-        return -1;
-    }
-
-    data = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (data == MAP_FAILED) {
-        perror("mmap");
-        close(fd);
-        return -1;
-    }
-
-    close(fd);
-
-    *buf = data;
-    *size = st.st_size;
-
-    return 0;
-}
-
 /* Test API generating files to the file system and then scanning them back */
 static void test_fs_write()
 {
     int i;
     int ret;
     int n_files = 100;
+    int flags;
     char *in_data;
     size_t in_size;
     char tmp[255];
-    unsigned char hash_sha1[20];
-    unsigned char hex_sha1[41];
     struct cio_ctx *ctx;
     struct cio_stream *stream;
     struct cio_file *file;
@@ -100,11 +60,13 @@ static void test_fs_write()
     /* Dummy break line for clarity on acutest output */
     printf("\n");
 
+    flags = CIO_CHECKSUM;
+
     /* cleanup environment */
-    utils_recursive_delete(CIO_ENV);
+    cio_utils_recursive_delete(CIO_ENV);
 
     /* Create main context */
-    ctx = cio_create(CIO_ENV, log_cb, CIO_INFO);
+    ctx = cio_create(CIO_ENV, log_cb, CIO_INFO, flags);
     TEST_CHECK(ctx != NULL);
 
     /* Try to create a file with an invalid stream */
@@ -127,7 +89,7 @@ static void test_fs_write()
      * Load sample data file and with the same content through multiple write
      * operations generating other files.
      */
-    ret = read_file(CIO_FILE_400KB, &in_data, &in_size);
+    ret = cio_utils_read_file(CIO_FILE_400KB, &in_data, &in_size);
     TEST_CHECK(ret == 0);
     if (ret == -1) {
         cio_destroy(ctx);
@@ -135,7 +97,7 @@ static void test_fs_write()
     }
 
     /* Number of test files to create */
-    n_files = 1000;
+    n_files = 100;
 
     /* Allocate files array */
     farr = calloc(1, sizeof(struct cio_file) * n_files);
@@ -146,8 +108,7 @@ static void test_fs_write()
 
     for (i = 0; i < n_files; i++) {
         snprintf(tmp, sizeof(tmp), "api-test-%04i.txt", i);
-        farr[i] = cio_file_open(ctx, stream, tmp,
-                                CIO_OPEN | CIO_HASH_CHECK, 1000000);
+        farr[i] = cio_file_open(ctx, stream, tmp, CIO_OPEN, 1000000);
 
         if (farr[i] == NULL) {
             continue;
@@ -168,7 +129,7 @@ static void test_fs_write()
     cio_destroy(ctx);
 
     /* Create new context using the data generated above */
-    ctx = cio_create(CIO_ENV, log_cb, CIO_INFO);
+    ctx = cio_create(CIO_ENV, log_cb, CIO_INFO, flags);
     TEST_CHECK(ctx != NULL);
     cio_scan_dump(ctx);
     cio_destroy(ctx);
@@ -181,6 +142,7 @@ static void test_fs_write()
 static void test_fs_checksum()
 {
     int ret;
+    int flags;
     char *in_data;
     char *f_hash;
     size_t in_size;
@@ -211,20 +173,22 @@ static void test_fs_checksum()
         0x00, 0x00, 0x00, 0x00, 0x00
     };
 
+    flags = CIO_CHECKSUM;
+
     /* Dummy break line for clarity on acutest output */
     printf("\n");
 
     /* cleanup environment */
-    utils_recursive_delete(CIO_ENV);
+    cio_utils_recursive_delete(CIO_ENV);
 
-    ctx = cio_create(CIO_ENV, log_cb, CIO_INFO);
+    ctx = cio_create(CIO_ENV, log_cb, CIO_INFO, flags);
     TEST_CHECK(ctx != NULL);
 
     stream = cio_stream_create(ctx, "test-crc32");
     TEST_CHECK(stream != NULL);
 
     /* Load sample data file in memory */
-    ret = read_file(CIO_FILE_400KB, &in_data, &in_size);
+    ret = cio_utils_read_file(CIO_FILE_400KB, &in_data, &in_size);
     TEST_CHECK(ret == 0);
     if (ret == -1) {
         cio_destroy(ctx);
@@ -237,8 +201,7 @@ static void test_fs_checksum()
      *  - sync
      *  - validate crc32_test1
      */
-    file = cio_file_open(ctx, stream, "test1.out",
-                         CIO_OPEN | CIO_HASH_CHECK, 10);
+    file = cio_file_open(ctx, stream, "test1.out", CIO_OPEN, 10);
 
     /* Check default crc32() for an empty file after sync */
     f_hash = cio_file_hash(file);
