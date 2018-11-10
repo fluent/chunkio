@@ -89,6 +89,63 @@ $ tools/cio -l
         stdin/somefile        alloc_size=4096, data_size=4072, crc=6dd73d2e
 ```
 
+### Performance Test
+
+The _cli_ tool offers a simple performance test which can be used to measure how fast data can be processed and stored under different setups. The following options are available:
+
+| option | value                                                  | description                                                  | default |
+| ------ | ------------------------------------------------------ | ------------------------------------------------------------ | ------- |
+| -p     | path to a file that will be used to perform I/O tests. | Enable performance mode setting up a file that will be used for the test. |         |
+| -e     | integer value                                          | Set number of files to create.                               | 1000    |
+| -w     | integer value                                          | For each file being created, this option set the number of times the content will be written to each file. | 5       |
+
+The following example will take the data sample file provided in chunkio source code of 400KB, run the performance test creating 1000 files of 2MB each (5 writes of 400KB per file):
+
+```
+$ tools/cio -p ../tests/data/400kb.txt
+=== perf write === 
+-  crc32 checksum : disabled
+-  fs sync mode   : normal
+-  file size      : 400.0K (409600 bytes)
+-  total files    : 1000
+-  file writes    : 5
+-  bytes written  : 1.9G (2048000000 bytes)
+-  elapsed time   : 1.46 seconds
+-  rate           : 1.3G per second (1398600425.33 bytes)
+```
+
+Enabling the checksum mode with the option __-k__ will calculate the CRC32 checksum of the content. This option will make it run slower but it provides an integrity check option inside each created file:
+
+```
+$ tools/cio -k -p ../tests/data/400kb.txt
+=== perf write === 
+-  crc32 checksum : enabled
+-  fs sync mode   : normal
+-  file size      : 400.0K (409600 bytes)
+-  total files    : 1000
+-  file writes    : 5
+-  bytes written  : 1.9G (2048000000 bytes)
+-  elapsed time   : 3.75 seconds
+-  rate           : 520.2M per second (545507660.63 bytes)
+```
+
+By default the synchronization mode to flush the changes to the file system is __normal__ (based on MAP_ASYNC). In technical terms we let the Kernel decide when to flush the memory pages to disk based on it I/O strategy. If the program is killed or it crash while some pages have not been flushed, that file will be incomplete or corrupted. Depending of the use case, a user would prefer data safety over performance, for such scenario a synchronization mode called __full__ (based on MAP_SYNC) is available through the __-F__ option:
+
+```
+$ tools/cio -F -k -p ../tests/data/400kb.txt
+=== perf write === 
+-  crc32 checksum : enabled
+-  fs sync mode   : full
+-  file size      : 400.0K (409600 bytes)
+-  total files    : 1000
+-  file writes    : 5
+-  bytes written  : 1.9G (2048000000 bytes)
+-  elapsed time   : 24.40 seconds
+-  rate           : 80.1M per second (83950015.02 bytes)
+```
+
+For most of scenarios running synchronization in __normal__ mode is good enough, but we let the user to decide it own strategy. 
+
 ## TODO
 
 - [ ] Document C API: dev is still in progress, so constant changes are expected
