@@ -34,11 +34,13 @@
 /* flags */
 #define CIO_OPEN        1   /* open/create file reference */
 #define CIO_OPEN_RD     2   /* open and read/mmap content if exists */
-#define CIO_HASH_CHECK  4   /* enable hash verification (sha1) */
+#define CIO_CHECKSUM    4   /* enable checksum verification (crc32) */
+#define CIO_FULL_SYNC   8   /* force sync to fs through MAP_SYNC */
 
 int cio_page_size;
 
 struct cio_ctx {
+    int flags;
     char *root_path;
 
     /* logging */
@@ -50,7 +52,7 @@ struct cio_ctx {
 };
 
 struct cio_ctx *cio_create(const char *root_path,
-                           void (*log_cb), int log_level);
+                           void (*log_cb), int log_level, int flags);
 void cio_destroy(struct cio_ctx *ctx);
 
 void cio_set_log_callback(struct cio_ctx *ctx, void (*log_cb));

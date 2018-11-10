@@ -56,6 +56,28 @@ char cio_file_init_bytes[] =   {
 
 #define round_up(a, b)  (a + (b - (a % b)))
 
+static int file_change_size(struct cio_file *cf, size_t new_size)
+{
+    int ret;
+
+    if (new_size > cf->alloc_size) {
+        /*
+         * To increase the file size we use fallocate() since this option
+         * will send a proper ENOSPC error if the file system ran out of
+         * space. ftruncate() will not fail and upon memcpy() over the
+         * mmap area it will trigger a 'Bus Error' crashing the program.
+         *
+         * fallocate() is not portable, Linux only.
+         */
+        ret = fallocate(cf->fd, 0, 0, new_size);
+    }
+    else {
+        ret = ftruncate(cf->fd, new_size);
+    }
+
+    return ret;
+}
+
 /* Get the number of bytes in the Content section */
 static size_t content_len(struct cio_file *cf)
 {
@@ -171,7 +193,7 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
         calculate_checksum(cf, &crc);
 
         /* Compare checksum */
-        if (cf->flags & CIO_HASH_CHECK) {
+        if (cf->ctx->flags & CIO_CHECKSUM) {
             crc_check = cio_crc32_finalize(crc);
             crc_check = htonl(crc_check);
             if (memcmp(p, &crc_check, sizeof(crc_check)) != 0) {
@@ -193,6 +215,9 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
  * CIO_OPEN:
  *    - Open for read/write, if the file don't exist, it's created and the
  *      memory map size is assigned to the given value on 'size'.
+ *
+ * CIO_OPEN_RD:
+ *    - If file exisst, open it in read-only mode.
  */
 struct cio_file *cio_file_open(struct cio_ctx *ctx,
                                struct cio_stream *st,
@@ -323,7 +348,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
 
         /* For empty files, make room in the file system */
         size = round_up(size, cio_page_size);
-        ret = ftruncate(cf->fd, size);
+        ret = file_change_size(cf, size);
         if (ret == -1) {
             cio_errno();
             cio_file_close(cf);
@@ -432,25 +457,26 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
             return -1;
         }
 
-
         cf->map = tmp;
         cio_log_debug(cf->ctx,
                       "[cio file] alloc_size from %lu to %lu",
                       cf->alloc_size, new_size);
         cf->alloc_size = new_size;
 
-        ret = ftruncate(cf->fd, cf->alloc_size);
+        ret = file_change_size(cf, cf->alloc_size);
         if (ret == -1) {
             cio_errno();
             cio_log_error(cf->ctx,
                           "[cio_file] error setting new file size on write");
             return -1;
         }
-
-        cf->st_content = cio_file_st_get_content(cf->map);
     }
 
-    update_checksum(cf, (unsigned char *) buf, count);
+    if (cf->ctx->flags & CIO_CHECKSUM) {
+        update_checksum(cf, (unsigned char *) buf, count);
+    }
+
+    cf->st_content = cio_file_st_get_content(cf->map);
     memcpy(cf->st_content + cf->data_size, buf, count);
 
     cf->data_size += count;
@@ -462,6 +488,7 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
 int cio_file_sync(struct cio_file *cf)
 {
     int ret;
+    int sync_mode;
     size_t av_size;
     size_t size;
     struct stat fst;
@@ -484,7 +511,7 @@ int cio_file_sync(struct cio_file *cf)
     av_size = get_available_size(cf);
     if (av_size > 0) {
         size = cf->alloc_size - av_size;
-        ret = ftruncate(cf->fd, size);
+        ret = file_change_size(cf, size);
         if (ret == -1) {
             cio_errno();
             cio_log_error(cf->ctx,
@@ -494,7 +521,7 @@ int cio_file_sync(struct cio_file *cf)
         cf->alloc_size = size;
     }
     else if (cf->alloc_size > fst.st_size) {
-        ret = ftruncate(cf->fd, cf->alloc_size);
+        ret = file_change_size(cf, cf->alloc_size);
         if (ret == -1) {
             cio_errno();
             cio_log_error(cf->ctx,
@@ -504,10 +531,20 @@ int cio_file_sync(struct cio_file *cf)
     }
 
     /* Finalize CRC32 checksum */
-    finalize_checksum(cf);
+    if (cf->ctx->flags & CIO_CHECKSUM) {
+        finalize_checksum(cf);
+    }
+
+    /* Sync mode */
+    if (cf->ctx->flags & CIO_FULL_SYNC) {
+        sync_mode = MS_SYNC;
+    }
+    else {
+        sync_mode = MS_ASYNC;
+    }
 
     /* Commit changes to disk */
-    ret = msync(cf->map, cf->alloc_size, MS_ASYNC);
+    ret = msync(cf->map, cf->alloc_size, sync_mode);
     if (ret == -1) {
         cio_errno();
         return -1;

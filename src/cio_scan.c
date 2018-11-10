@@ -28,7 +28,6 @@
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_file.h>
 #include <chunkio/cio_log.h>
-#include <chunkio/cio_sha1.h>
 
 static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
 {

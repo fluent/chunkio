@@ -3,6 +3,7 @@ set(src
   cio_log.c
   cio_file.c
   cio_scan.c
+  cio_utils.c
   cio_stream.c
   chunkio.c
   )

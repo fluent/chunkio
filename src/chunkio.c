@@ -54,7 +54,7 @@ static int check_root_path(struct cio_ctx *ctx, const char *root_path)
 }
 
 struct cio_ctx *cio_create(const char *root_path,
-                           void (*log_cb), int log_level)
+                           void (*log_cb), int log_level, int flags)
 {
     int ret;
     struct cio_ctx *ctx;
@@ -73,6 +73,8 @@ struct cio_ctx *cio_create(const char *root_path,
     }
     cio_set_log_callback(ctx, log_cb);
     cio_set_log_level(ctx, log_level);
+
+    ctx->flags = flags;
 
     /* Check or initialize file system root path */
     ret = check_root_path(ctx, root_path);
