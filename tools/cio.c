@@ -76,8 +76,10 @@ static void cio_help(int rc)
     printf("  -F, --full-sync\tforce data flush to disk\n");
     printf("  -k, --checksum\tenable CRC32 checksum\n");
     printf("  -p, --perf=FILE\trun performance test\n");
-    printf("  -w, --writes=N\tset number of writes for performance mode "
+    printf("  -w, --perf-writes=N\tset number of writes for performance mode "
            "(default: 5)\n");
+    printf("  -f, --perf-files=N\tset number of files to create on "
+           "performance mode (default: 1000)\n");
     printf("  -h, --help\t\tprint this help\n");
     exit(rc);
 }
@@ -296,12 +298,11 @@ static int time_diff(struct timespec *tm0, struct timespec *tm1,
     return 0;
 }
 
-static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile, int writes)
+static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile, int writes, int files)
 {
     int i;
     int j;
     int ret;
-    int n_files = 100;
     int flags;
     uint64_t bytes = 0;
     double rate;
@@ -329,11 +330,8 @@ static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile, int writes)
         exit(EXIT_FAILURE);
     }
 
-    /* Number of test files to create */
-    n_files = 1000;
-
     /* Allocate files array */
-    farr = calloc(1, sizeof(struct cio_file) * n_files);
+    farr = calloc(1, sizeof(struct cio_file) * files);
     if (!farr) {
         perror("calloc");
         exit(EXIT_FAILURE);
@@ -341,7 +339,7 @@ static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile, int writes)
 
     /* Perf-write test */
     timespec_get(&t1, TIME_UTC);
-    for (i = 0; i < n_files; i++) {
+    for (i = 0; i < files; i++) {
         snprintf(tmp, sizeof(tmp), "perf-test-%04i.txt", i);
         farr[i] = cio_file_open(ctx, stream, tmp, CIO_OPEN, in_size);
         if (farr[i] == NULL) {
@@ -368,11 +366,18 @@ static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile, int writes)
      * ====================
      */
     cio_bytes_to_human_readable_size(bytes, tmp, sizeof(tmp) - 1);
-    printf("== perf write == \n");
+    printf("=== perf write === \n");
     printf("-  crc32 checksum : %s\n",
            ctx->flags & CIO_CHECKSUM ? "enabled" : "disabled");
     printf("-  fs sync mode   : %s\n",
            ctx->flags & CIO_FULL_SYNC ? "full" : "normal");
+
+    cio_bytes_to_human_readable_size(in_size, tmp, sizeof(tmp) - 1);
+    printf("-  file size      : %s (%lu bytes)\n", tmp, in_size);
+    printf("-  total files    : %i\n", files);
+    printf("-  file writes    : %i\n", writes);
+
+    cio_bytes_to_human_readable_size(bytes, tmp, sizeof(tmp) - 1);
     printf("-  bytes written  : %s (%lu bytes)\n" , tmp, bytes);
     printf("-  elapsed time   : %.2f seconds\n", time_to_double(&t_final));
 
@@ -391,6 +396,7 @@ int main(int argc, char **argv)
     int opt;
     int opt_silent = CIO_FALSE;
     int opt_pwrites = 5;
+    int opt_pfiles = 1000;
     int cmd_stdin = CIO_FALSE;
     int cmd_list = CIO_FALSE;
     int cmd_perf = CIO_FALSE;
@@ -404,7 +410,7 @@ int main(int argc, char **argv)
     struct cio_ctx *ctx;
 
     static const struct option long_opts[] = {
-        {"full-sync"  , no_argument      , NULL, 'f'},
+        {"full-sync"  , no_argument      , NULL, 'F'},
         {"checksum"   , no_argument      , NULL, 'k'},
         {"list"       , no_argument      , NULL, 'l'},
         {"root"       , required_argument, NULL, 'r'},
@@ -413,6 +419,7 @@ int main(int argc, char **argv)
         {"stream"     , required_argument, NULL, 's'},
         {"perf"       , required_argument, NULL, 'p'},
         {"perf-writes", required_argument, NULL, 'w'},
+        {"perf-files" , required_argument, NULL, 'e'},
         {"verbose"    , no_argument      , NULL, 'v'},
         {"help"       , no_argument      , NULL, 'h'},
     };
@@ -420,7 +427,7 @@ int main(int argc, char **argv)
     /* Initialize signals */
     cio_signal_init();
 
-    while ((opt = getopt_long(argc, argv, "Fklr:p:w:Sis:f:vh",
+    while ((opt = getopt_long(argc, argv, "Fklr:p:w:e:Sis:f:vh",
                               long_opts, NULL)) != -1) {
         switch (opt) {
         case 'F':
@@ -446,6 +453,9 @@ int main(int argc, char **argv)
             break;
         case 'w':
             opt_pwrites = atoi(optarg);
+            break;
+        case 'e':
+            opt_pfiles = atoi(optarg);
             break;
         case 'S':
             opt_silent = CIO_TRUE;
@@ -513,7 +523,7 @@ int main(int argc, char **argv)
         ret = cb_cmd_stdin(ctx, stream, fname);
     }
     else if (cmd_perf == CIO_TRUE) {
-        cb_cmd_perf(ctx, perf_file, opt_pwrites);
+        cb_cmd_perf(ctx, perf_file, opt_pwrites, opt_pfiles);
         free(perf_file);
     }
     else {
