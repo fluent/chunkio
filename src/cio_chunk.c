@@ -146,6 +146,6 @@ char *cio_chunk_hash(struct cio_chunk *ch)
     if (ch->st->type == CIO_STORE_FS) {
         return cio_file_hash(ch->backend);
     }
-    exit(10);
+
     return NULL;
 }
