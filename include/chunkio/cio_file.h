@@ -53,8 +53,10 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
 void cio_file_close(struct cio_file *cf);
 int cio_file_write(struct cio_file *cf, const void *buf, size_t count);
 int cio_file_sync(struct cio_file *cf);
+int cio_file_fs_size_change(struct cio_file *cf, size_t new_size);
 int cio_file_close_stream(struct cio_stream *st);
 char *cio_file_hash(struct cio_file *cf);
 void cio_file_hash_print(struct cio_file *cf);
+void cio_file_calculate_checksum(struct cio_file *cf, crc_t *out);
 
 #endif

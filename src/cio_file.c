@@ -56,28 +56,6 @@ char cio_file_init_bytes[] =   {
 
 #define round_up(a, b)  (a + (b - (a % b)))
 
-static int file_change_size(struct cio_file *cf, size_t new_size)
-{
-    int ret;
-
-    if (new_size > cf->alloc_size) {
-        /*
-         * To increase the file size we use fallocate() since this option
-         * will send a proper ENOSPC error if the file system ran out of
-         * space. ftruncate() will not fail and upon memcpy() over the
-         * mmap area it will trigger a 'Bus Error' crashing the program.
-         *
-         * fallocate() is not portable, Linux only.
-         */
-        ret = fallocate(cf->fd, 0, 0, new_size);
-    }
-    else {
-        ret = ftruncate(cf->fd, new_size);
-    }
-
-    return ret;
-}
-
 /* Get the number of bytes in the Content section */
 static size_t content_len(struct cio_file *cf)
 {
@@ -91,7 +69,7 @@ static size_t content_len(struct cio_file *cf)
 }
 
 /* Calculate content checksum in a variable */
-static void calculate_checksum(struct cio_file *cf, crc_t *out)
+void cio_file_calculate_checksum(struct cio_file *cf, crc_t *out)
 {
     crc_t val;
     size_t len;
@@ -109,6 +87,7 @@ static void update_checksum(struct cio_file *cf,
                             unsigned char *data, size_t len)
 {
     crc_t crc;
+    uint32_t hcrc;
     void *in_data;
 
     crc = cio_crc32_update(cf->crc_cur, data, len);
@@ -176,7 +155,7 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
         write_init_header(cf);
 
         /* Write checksum in context (note: crc32 not finalized) */
-        calculate_checksum(cf, &cf->crc_cur);
+        cio_file_calculate_checksum(cf, &cf->crc_cur);
     }
     else {
         /* Check first two bytes */
@@ -190,7 +169,7 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
         p = cio_file_st_get_hash(cf->map);
 
         /* Calculate data checksum in variable */
-        calculate_checksum(cf, &crc);
+        cio_file_calculate_checksum(cf, &crc);
 
         /* Compare checksum */
         if (cf->ctx->flags & CIO_CHECKSUM) {
@@ -348,7 +327,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
 
         /* For empty files, make room in the file system */
         size = round_up(size, cio_page_size);
-        ret = file_change_size(cf, size);
+        ret = cio_file_fs_size_change(cf, size);
         if (ret == -1) {
             cio_errno();
             cio_file_close(cf);
@@ -463,7 +442,7 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
                       cf->alloc_size, new_size);
         cf->alloc_size = new_size;
 
-        ret = file_change_size(cf, cf->alloc_size);
+        ret = cio_file_fs_size_change(cf, cf->alloc_size);
         if (ret == -1) {
             cio_errno();
             cio_log_error(cf->ctx,
@@ -511,7 +490,7 @@ int cio_file_sync(struct cio_file *cf)
     av_size = get_available_size(cf);
     if (av_size > 0) {
         size = cf->alloc_size - av_size;
-        ret = file_change_size(cf, size);
+        ret = cio_file_fs_size_change(cf, size);
         if (ret == -1) {
             cio_errno();
             cio_log_error(cf->ctx,
@@ -521,7 +500,7 @@ int cio_file_sync(struct cio_file *cf)
         cf->alloc_size = size;
     }
     else if (cf->alloc_size > fst.st_size) {
-        ret = file_change_size(cf, cf->alloc_size);
+        ret = cio_file_fs_size_change(cf, cf->alloc_size);
         if (ret == -1) {
             cio_errno();
             cio_log_error(cf->ctx,
@@ -554,6 +533,29 @@ int cio_file_sync(struct cio_file *cf)
     cio_log_debug(cf->ctx, "[cio file] synced at: %s/%s",
                   cf->st->name, cf->name);
     return 0;
+}
+
+/* Change the size of file in the file system (not memory map) */
+int cio_file_fs_size_change(struct cio_file *cf, size_t new_size)
+{
+    int ret;
+
+    if (new_size > cf->alloc_size) {
+        /*
+         * To increase the file size we use fallocate() since this option
+         * will send a proper ENOSPC error if the file system ran out of
+         * space. ftruncate() will not fail and upon memcpy() over the
+         * mmap area it will trigger a 'Bus Error' crashing the program.
+         *
+         * fallocate() is not portable, Linux only.
+         */
+        ret = fallocate(cf->fd, 0, 0, new_size);
+    }
+    else {
+        ret = ftruncate(cf->fd, new_size);
+    }
+
+    return ret;
 }
 
 /* Set a reallocation chunk size */
