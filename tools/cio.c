@@ -361,17 +361,17 @@ static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile,
 
         if (meta_len > 0) {
             cio_meta_write(farr[i], metadata, meta_len);
+            bytes += meta_len;
         }
 
         for (j = 0; j < writes; j++) {
             ret = cio_file_write(farr[i], in_data, in_size);
             if (ret == -1) {
-                exit(5);
+                exit(1);
             }
+            bytes += in_size;
         }
-
         cio_file_sync(farr[i]);
-        bytes += (in_size * 5);
     }
     timespec_get(&t2, TIME_UTC);
 
