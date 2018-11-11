@@ -123,6 +123,7 @@ int cio_scan_streams(struct cio_ctx *ctx)
 
 void cio_scan_dump(struct cio_ctx *ctx)
 {
+    int meta_len;
     char *p;
     char hash[41];
     char tmp[PATH_MAX];
@@ -142,6 +143,8 @@ void cio_scan_dump(struct cio_ctx *ctx)
             cf = mk_list_entry(f_head, struct cio_file, _head);
             snprintf(tmp, sizeof(tmp) -1, "%s/%s", st->name, cf->name);
 
+            meta_len = cio_file_st_get_meta_len(cf->map);
+
             p = cio_file_st_get_hash(cf->map);
             crc_t val;
 
@@ -149,8 +152,29 @@ void cio_scan_dump(struct cio_ctx *ctx)
             val = ntohl(val);
 
             printf("        %-60s", tmp);
-            printf("alloc_size=%lu, data_size=%lu, crc=%08x\n",
-                   cf->alloc_size, cf->data_size, (uint32_t) val);
+
+
+            /*
+             * the crc32 specified in the file is stored in 'val' now, if
+             * checksum mode is enabled we have to verify it.
+             */
+            if (ctx->flags & CIO_CHECKSUM) {
+                crc_t crc;
+                cio_file_calculate_checksum(cf, &crc);
+
+                /*
+                 * finalize the checksum and compare it value using the
+                 * host byte order.
+                 */
+                crc = cio_crc32_finalize(crc);
+                if (crc != val) {
+                    printf("checksum error=%08x expected=%08x, ",
+                           (uint32_t) val, (uint32_t) crc);
+                }
+            }
+
+            printf("meta_len=%d, data_size=%lu, crc=%08x\n",
+                   meta_len, cf->data_size, (uint32_t) val);
         }
     }
 }
