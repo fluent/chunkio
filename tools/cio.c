@@ -62,6 +62,7 @@
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_file.h>
+#include <chunkio/cio_meta.h>
 #include <chunkio/cio_scan.h>
 #include <chunkio/cio_utils.h>
 
@@ -201,10 +202,11 @@ static int cb_cmd_list(struct cio_ctx *ctx)
 
 /* command/stdin: read data from STDIN and dump it into stream/file */
 static int cb_cmd_stdin(struct cio_ctx *ctx, const char *stream,
-                        const char *fname)
+                        const char *fname, const char *metadata)
 {
     int fd;
     int ret;
+    int meta_len;
     size_t total = 0;
     ssize_t bytes;
     char buf[1024*8];
@@ -223,6 +225,11 @@ static int cb_cmd_stdin(struct cio_ctx *ctx, const char *stream,
     if (!cf) {
         cio_log_error(ctx, "cannot create file");
         return -1;
+    }
+
+    if (metadata) {
+        meta_len = strlen(metadata);
+        cio_meta_write(cf, (char *) metadata, meta_len);
     }
 
     /* Catch up stdin */
@@ -298,10 +305,12 @@ static int time_diff(struct timespec *tm0, struct timespec *tm1,
     return 0;
 }
 
-static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile, int writes, int files)
+static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile,
+                        char *metadata, int writes, int files)
 {
     int i;
     int j;
+    int meta_len = 0;
     int ret;
     int flags;
     uint64_t bytes = 0;
@@ -337,6 +346,10 @@ static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile, int writes, int files)
         exit(EXIT_FAILURE);
     }
 
+    if (metadata) {
+        meta_len = strlen(metadata);
+    }
+
     /* Perf-write test */
     timespec_get(&t1, TIME_UTC);
     for (i = 0; i < files; i++) {
@@ -344,6 +357,10 @@ static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile, int writes, int files)
         farr[i] = cio_file_open(ctx, stream, tmp, CIO_OPEN, in_size);
         if (farr[i] == NULL) {
             continue;
+        }
+
+        if (meta_len > 0) {
+            cio_meta_write(farr[i], metadata, meta_len);
         }
 
         for (j = 0; j < writes; j++) {
@@ -405,6 +422,7 @@ int main(int argc, char **argv)
     char *perf_file = NULL;
     char *fname = NULL;
     char *stream = NULL;
+    char *metadata = NULL;
     char *root_path = NULL;
     char tmp[PATH_MAX];
     struct cio_ctx *ctx;
@@ -417,6 +435,7 @@ int main(int argc, char **argv)
         {"silent"     , no_argument      , NULL, 'S'},
         {"stdin"      , no_argument      , NULL, 'i'},
         {"stream"     , required_argument, NULL, 's'},
+        {"metadata"   , required_argument, NULL, 'm'},
         {"perf"       , required_argument, NULL, 'p'},
         {"perf-writes", required_argument, NULL, 'w'},
         {"perf-files" , required_argument, NULL, 'e'},
@@ -427,7 +446,7 @@ int main(int argc, char **argv)
     /* Initialize signals */
     cio_signal_init();
 
-    while ((opt = getopt_long(argc, argv, "Fklr:p:w:e:Sis:f:vh",
+    while ((opt = getopt_long(argc, argv, "Fklr:p:w:e:Sis:m:f:vh",
                               long_opts, NULL)) != -1) {
         switch (opt) {
         case 'F':
@@ -462,6 +481,9 @@ int main(int argc, char **argv)
             break;
         case 's':
             stream = strdup(optarg);
+            break;
+        case 'm':
+            metadata = strdup(optarg);
             break;
         case 'f':
             fname = strdup(optarg);
@@ -520,10 +542,10 @@ int main(int argc, char **argv)
             cio_help(EXIT_FAILURE);
         }
 
-        ret = cb_cmd_stdin(ctx, stream, fname);
+        ret = cb_cmd_stdin(ctx, stream, fname, metadata);
     }
     else if (cmd_perf == CIO_TRUE) {
-        cb_cmd_perf(ctx, perf_file, opt_pwrites, opt_pfiles);
+        cb_cmd_perf(ctx, perf_file, metadata, opt_pwrites, opt_pfiles);
         free(perf_file);
     }
     else {
