@@ -24,6 +24,7 @@
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_scan.h>
 #include <chunkio/cio_file.h>
+#include <chunkio/cio_meta.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_utils.h>
 
@@ -47,6 +48,7 @@ static void test_fs_write()
 {
     int i;
     int ret;
+    int len;
     int n_files = 100;
     int flags;
     char *in_data;
@@ -106,8 +108,9 @@ static void test_fs_write()
         exit(EXIT_FAILURE);
     }
 
+
     for (i = 0; i < n_files; i++) {
-        snprintf(tmp, sizeof(tmp), "api-test-%04i.txt", i);
+        len = snprintf(tmp, sizeof(tmp), "api-test-%04i.txt", i);
         farr[i] = cio_file_open(ctx, stream, tmp, CIO_OPEN, 1000000);
 
         if (farr[i] == NULL) {
@@ -116,10 +119,16 @@ static void test_fs_write()
 
         cio_file_write(farr[i], in_data, in_size);
         cio_file_write(farr[i], in_data, in_size);
+
+        /* update metadata */
+        cio_meta_write(farr[i], tmp, len);
+
+        /* continue appending data to content area */
         cio_file_write(farr[i], in_data, in_size);
         cio_file_write(farr[i], in_data, in_size);
         cio_file_write(farr[i], in_data, in_size);
 
+        /* sync to disk */
         cio_file_sync(farr[i]);
     }
 

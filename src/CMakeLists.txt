@@ -2,6 +2,7 @@ set(src
   cio_os.c
   cio_log.c
   cio_file.c
+  cio_meta.c
   cio_scan.c
   cio_utils.c
   cio_stream.c
