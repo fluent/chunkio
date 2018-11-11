@@ -61,7 +61,7 @@
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
-#include <chunkio/cio_file.h>
+#include <chunkio/cio_chunk.h>
 #include <chunkio/cio_meta.h>
 #include <chunkio/cio_scan.h>
 #include <chunkio/cio_utils.h>
@@ -211,25 +211,25 @@ static int cb_cmd_stdin(struct cio_ctx *ctx, const char *stream,
     ssize_t bytes;
     char buf[1024*8];
     struct cio_stream *st;
-    struct cio_file *cf;
+    struct cio_chunk *ch;
 
     /* Prepare stream and file contexts */
-    st = cio_stream_create(ctx, stream);
+    st = cio_stream_create(ctx, stream, CIO_STORE_FS);
     if (!st) {
         cio_log_error(ctx, "cannot create stream\n");
         return -1;
     }
 
     /* Open a file with a hint of 32KB */
-    cf = cio_file_open(ctx, st, fname, CIO_OPEN, 1024*32);
-    if (!cf) {
+    ch = cio_chunk_open(ctx, st, fname, CIO_OPEN, 1024*32);
+    if (!ch) {
         cio_log_error(ctx, "cannot create file");
         return -1;
     }
 
     if (metadata) {
         meta_len = strlen(metadata);
-        cio_meta_write(cf, (char *) metadata, meta_len);
+        cio_meta_write(ch, (char *) metadata, meta_len);
     }
 
     /* Catch up stdin */
@@ -249,7 +249,7 @@ static int cb_cmd_stdin(struct cio_ctx *ctx, const char *stream,
             perror("read");
         }
         else {
-            ret = cio_file_write(cf, buf, bytes);
+            ret = cio_chunk_write(ch, buf, bytes);
             if (ret == -1) {
                 cio_log_error(ctx, "error writing to file");
                 close(fd);
@@ -263,8 +263,8 @@ static int cb_cmd_stdin(struct cio_ctx *ctx, const char *stream,
     close(fd);
 
     /* synchronize changes to disk and close */
-    cio_file_sync(cf);
-    cio_file_close(cf);
+    cio_chunk_sync(ch);
+    cio_chunk_close(ch);
 
     /* print some status */
     cio_bytes_to_human_readable_size(total, buf, sizeof(buf) - 1);
@@ -320,14 +320,14 @@ static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile,
     char tmp[255];
     char *perf_path = "/tmp/cio-perf/";
     struct cio_stream *stream;
-    struct cio_file *file;
-    struct cio_file **farr;
+    struct cio_chunk *chunk;
+    struct cio_chunk **carr;
     struct timespec t1;
     struct timespec t2;
     struct timespec t_final;
 
     /* Create pref stream */
-    stream = cio_stream_create(ctx, "test-perf");
+    stream = cio_stream_create(ctx, "test-perf", CIO_STORE_FS);
 
     /*
      * Load sample data file and with the same content through multiple write
@@ -340,8 +340,8 @@ static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile,
     }
 
     /* Allocate files array */
-    farr = calloc(1, sizeof(struct cio_file) * files);
-    if (!farr) {
+    carr = calloc(1, sizeof(struct cio_chunk) * files);
+    if (!carr) {
         perror("calloc");
         exit(EXIT_FAILURE);
     }
@@ -354,24 +354,25 @@ static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile,
     timespec_get(&t1, TIME_UTC);
     for (i = 0; i < files; i++) {
         snprintf(tmp, sizeof(tmp), "perf-test-%04i.txt", i);
-        farr[i] = cio_file_open(ctx, stream, tmp, CIO_OPEN, in_size);
-        if (farr[i] == NULL) {
+        carr[i] = cio_chunk_open(ctx, stream, tmp, CIO_OPEN, in_size);
+        if (carr[i] == NULL) {
             continue;
         }
 
         if (meta_len > 0) {
-            cio_meta_write(farr[i], metadata, meta_len);
+            cio_meta_write(carr[i], metadata, meta_len);
             bytes += meta_len;
         }
 
         for (j = 0; j < writes; j++) {
-            ret = cio_file_write(farr[i], in_data, in_size);
+            ret = cio_file_write(carr[i], in_data, in_size);
             if (ret == -1) {
                 exit(1);
             }
             bytes += in_size;
         }
-        cio_file_sync(farr[i]);
+        cio_chunk_sync(carr[i]);
+        cio_chunk_close(carr[i]);
     }
     timespec_get(&t2, TIME_UTC);
 
@@ -403,7 +404,7 @@ static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile,
     printf("-  rate           : %s per second (%.2f bytes)\n", tmp, rate);
 
     /* Release file data and destroy context */
-    free(farr);
+    free(carr);
     munmap(in_data, in_size);
 }
 
