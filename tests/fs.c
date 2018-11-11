@@ -56,8 +56,8 @@ static void test_fs_write()
     char tmp[255];
     struct cio_ctx *ctx;
     struct cio_stream *stream;
-    struct cio_file *file;
-    struct cio_file **farr;
+    struct cio_chunk *chunk;
+    struct cio_chunk **carr;
 
     /* Dummy break line for clarity on acutest output */
     printf("\n");
@@ -72,19 +72,19 @@ static void test_fs_write()
     TEST_CHECK(ctx != NULL);
 
     /* Try to create a file with an invalid stream */
-    file = cio_file_open(ctx, NULL, "invalid", 0, 0);
-    TEST_CHECK(file == NULL);
+    chunk = cio_chunk_open(ctx, NULL, "invalid", 0, 0);
+    TEST_CHECK(chunk == NULL);
 
     /* Check invalid stream */
-    stream = cio_stream_create(ctx, "");
+    stream = cio_stream_create(ctx, "", CIO_STORE_FS);
     TEST_CHECK(stream == NULL);
 
     /* Another invalid name */
-    stream = cio_stream_create(ctx, "/");
+    stream = cio_stream_create(ctx, "/", CIO_STORE_FS);
     TEST_CHECK(stream == NULL);
 
     /* Create valid stream */
-    stream = cio_stream_create(ctx, "test-write");
+    stream = cio_stream_create(ctx, "test-write", CIO_STORE_FS);
     TEST_CHECK(stream != NULL);
 
     /*
@@ -102,8 +102,8 @@ static void test_fs_write()
     n_files = 100;
 
     /* Allocate files array */
-    farr = calloc(1, sizeof(struct cio_file) * n_files);
-    if (!farr) {
+    carr = calloc(1, sizeof(struct cio_file) * n_files);
+    if (!carr) {
         perror("calloc");
         exit(EXIT_FAILURE);
     }
@@ -111,29 +111,29 @@ static void test_fs_write()
 
     for (i = 0; i < n_files; i++) {
         len = snprintf(tmp, sizeof(tmp), "api-test-%04i.txt", i);
-        farr[i] = cio_file_open(ctx, stream, tmp, CIO_OPEN, 1000000);
+        carr[i] = cio_chunk_open(ctx, stream, tmp, CIO_OPEN, 1000000);
 
-        if (farr[i] == NULL) {
+        if (carr[i] == NULL) {
             continue;
         }
 
-        cio_file_write(farr[i], in_data, in_size);
-        cio_file_write(farr[i], in_data, in_size);
+        cio_chunk_write(carr[i], in_data, in_size);
+        cio_chunk_write(carr[i], in_data, in_size);
 
         /* update metadata */
-        cio_meta_write(farr[i], tmp, len);
+        cio_meta_write(carr[i], tmp, len);
 
         /* continue appending data to content area */
-        cio_file_write(farr[i], in_data, in_size);
-        cio_file_write(farr[i], in_data, in_size);
-        cio_file_write(farr[i], in_data, in_size);
+        cio_chunk_write(carr[i], in_data, in_size);
+        cio_chunk_write(carr[i], in_data, in_size);
+        cio_chunk_write(carr[i], in_data, in_size);
 
         /* sync to disk */
-        cio_file_sync(farr[i]);
+        cio_chunk_sync(carr[i]);
     }
 
     /* Release file data and destroy context */
-    free(farr);
+    free(carr);
     munmap(in_data, in_size);
     cio_destroy(ctx);
 
@@ -159,7 +159,7 @@ static void test_fs_checksum()
     uint32_t val;
     struct cio_ctx *ctx;
     struct cio_stream *stream;
-    struct cio_file *file;
+    struct cio_chunk *chunk;
 
     /*
      * crc32 checksums
@@ -193,7 +193,7 @@ static void test_fs_checksum()
     ctx = cio_create(CIO_ENV, log_cb, CIO_INFO, flags);
     TEST_CHECK(ctx != NULL);
 
-    stream = cio_stream_create(ctx, "test-crc32");
+    stream = cio_stream_create(ctx, "test-crc32", CIO_STORE_FS);
     TEST_CHECK(stream != NULL);
 
     /* Load sample data file in memory */
@@ -210,11 +210,13 @@ static void test_fs_checksum()
      *  - sync
      *  - validate crc32_test1
      */
-    file = cio_file_open(ctx, stream, "test1.out", CIO_OPEN, 10);
+    chunk = cio_chunk_open(ctx, stream, "test1.out", CIO_OPEN, 10);
+    TEST_CHECK(chunk != NULL);
 
     /* Check default crc32() for an empty file after sync */
-    f_hash = cio_file_hash(file);
-    cio_file_sync(file);
+    f_hash = cio_chunk_hash(chunk);
+    TEST_CHECK(f_hash != NULL);
+    cio_chunk_sync(chunk);
 
     memcpy(&val, f_hash, sizeof(val));
     val = ntohl(val);
@@ -232,10 +234,10 @@ static void test_fs_checksum()
      * note that the second sha1 calculation is done using the initial
      * sha1 context so it skip old data to perform the verification.
      */
-    cio_file_write(file, in_data, in_size);
-    cio_file_sync(file);
+    cio_chunk_write(chunk, in_data, in_size);
+    cio_chunk_sync(chunk);
 
-    f_hash = cio_file_hash(file);
+    f_hash = cio_chunk_hash(chunk);
     memcpy(&val, f_hash, sizeof(val));
     val = ntohl(val);
 
