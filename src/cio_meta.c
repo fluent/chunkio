@@ -62,13 +62,6 @@ static int adjust_layout(struct cio_file *cf, size_t meta_size)
 
     /* Sync changes to disk */
     cf->synced = CIO_FALSE;
-    ret = cio_file_sync(cf);
-    if (ret == -1) {
-        cio_log_error(cf->ctx,
-                      "[cio meta layout] cannot sync changes to disk at: "
-                      "%s/%s", cf->st->name, cf->name);
-        return -1;
-    }
 
     return 0;
 }
