@@ -46,7 +46,8 @@
  * adjust_layout: if metadata has changed, we need to adjust the content
  * data and reference pointers.
  */
-static int adjust_layout(struct cio_file *cf, size_t meta_size)
+static int adjust_layout(struct cio_chunk *ch,
+                         struct cio_file *cf, size_t meta_size)
 {
     int ret;
     crc_t crc;
@@ -54,7 +55,7 @@ static int adjust_layout(struct cio_file *cf, size_t meta_size)
     cio_file_st_set_meta_len(cf->map, (uint16_t) meta_size);
 
     /* Update checksum */
-    if (cf->ctx->flags & CIO_CHECKSUM) {
+    if (ch->ctx->flags & CIO_CHECKSUM) {
         /* reset current crc since we are calculating from zero */
         cf->crc_cur = cio_crc32_init();
         cio_file_calculate_checksum(cf, &cf->crc_cur);
@@ -66,7 +67,7 @@ static int adjust_layout(struct cio_file *cf, size_t meta_size)
     return 0;
 }
 
-int cio_meta_write(struct cio_file *cf, char *buf, size_t size)
+int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
 {
     int ret;
     char *meta;
@@ -78,6 +79,7 @@ int cio_meta_write(struct cio_file *cf, char *buf, size_t size)
     size_t content_av;
     size_t meta_av;
     void *tmp;
+    struct cio_file *cf = ch->backend;
 
     /* Get metadata pointer */
     meta = cio_file_st_get_meta(cf->map);
@@ -95,7 +97,7 @@ int cio_meta_write(struct cio_file *cf, char *buf, size_t size)
         cur_content_data = cio_file_st_get_content(cf->map);
         new_content_data = meta + size;
         memmove(new_content_data, cur_content_data, cf->data_size);
-        adjust_layout(cf, size);
+        adjust_layout(ch, cf, size);
 
         return 0;
     }
@@ -117,7 +119,7 @@ int cio_meta_write(struct cio_file *cf, char *buf, size_t size)
         tmp = mremap(cf->map, cf->alloc_size, new_size, MREMAP_MAYMOVE);
         if (tmp == MAP_FAILED) {
             cio_errno();
-            cio_log_error(cf->ctx,
+            cio_log_error(ch->ctx,
                           "[cio meta] data exceeds available space "
                           "(alloc=%lu current_size=%lu meta_size=%lu)",
                           cf->alloc_size, cf->data_size, size);
@@ -145,5 +147,5 @@ int cio_meta_write(struct cio_file *cf, char *buf, size_t size)
 
     /* copy new metadata */
     memcpy(meta, buf, size);
-    adjust_layout(cf, size);
+    adjust_layout(ch, cf, size);
 }

@@ -29,9 +29,11 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <arpa/inet.h>
+#include <limits.h>
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_crc32.h>
+#include <chunkio/cio_chunk.h>
 #include <chunkio/cio_file.h>
 #include <chunkio/cio_file_st.h>
 #include <chunkio/cio_log.h>
@@ -128,7 +130,8 @@ static size_t get_available_size(struct cio_file *cf)
  * For the recently opened or created file, check the structure format
  * and validate relevant fields.
  */
-static int cio_file_format_check(struct cio_file *cf, int flags)
+static int cio_file_format_check(struct cio_chunk *ch,
+                                 struct cio_file *cf, int flags)
 {
     char *p;
     crc_t crc_check;
@@ -140,14 +143,14 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
     if (cf->fs_size == 0) {
         /* check we have write permissions */
         if ((cf->flags & CIO_OPEN) == 0) {
-            cio_log_warn(cf->ctx,
+            cio_log_warn(ch->ctx,
                          "[cio file] cannot initialize chunk (read-only)");
             return -1;
         }
 
         /* at least we need 24 bytes as allocated space */
         if (cf->alloc_size < CIO_FILE_HEADER_MIN) {
-            cio_log_warn(cf->ctx, "[cio file] cannot initialize chunk");
+            cio_log_warn(ch->ctx, "[cio file] cannot initialize chunk");
             return -1;
         }
 
@@ -160,8 +163,8 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
     else {
         /* Check first two bytes */
         if (p[0] != CIO_FILE_ID_00 || p[1] != CIO_FILE_ID_01) {
-            cio_log_debug(cf->ctx, "[cio file] invalid header at %s",
-                          cf->name);
+            cio_log_debug(ch->ctx, "[cio file] invalid header at %s",
+                          ch->name);
             return -1;
         }
 
@@ -172,12 +175,12 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
         cio_file_calculate_checksum(cf, &crc);
 
         /* Compare checksum */
-        if (cf->ctx->flags & CIO_CHECKSUM) {
+        if (ch->ctx->flags & CIO_CHECKSUM) {
             crc_check = cio_crc32_finalize(crc);
             crc_check = htonl(crc_check);
             if (memcmp(p, &crc_check, sizeof(crc_check)) != 0) {
-                cio_log_debug(cf->ctx, "[cio file] invalid crc32 at %s",
-                              cf->name);
+                cio_log_debug(ch->ctx, "[cio file] invalid crc32 at %s",
+                              ch->name);
                 return -1;
             }
             cf->crc_cur = crc;
@@ -200,7 +203,7 @@ static int cio_file_format_check(struct cio_file *cf, int flags)
  */
 struct cio_file *cio_file_open(struct cio_ctx *ctx,
                                struct cio_stream *st,
-                               const char *name,
+                               struct cio_chunk *ch,
                                int flags,
                                size_t size)
 {
@@ -216,29 +219,14 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     struct stat fst;
     (void) ctx;
 
-    if (!st) {
-        cio_log_error(ctx, "[cio file] invalid stream");
-        return NULL;
-    }
-
-    if (!name) {
-        cio_log_error(ctx, "[cio file] invalid file name");
-        return NULL;
-    }
-
-    len = strlen(name);
-    if (len == 0) {
-        cio_log_error(ctx, "[cio file] invalid file name");
-        return NULL;
-    }
-
-    if (len == 1 && (name[0] == '.' || name[0] == '/')) {
+    len = strlen(ch->name);
+    if (len == 1 && (ch->name[0] == '.' || ch->name[0] == '/')) {
         cio_log_error(ctx, "[cio file] invalid file name");
         return NULL;
     }
 
     /* Compose path for the file */
-    psize = strlen(ctx->root_path) + strlen(st->name) + strlen(name);
+    psize = strlen(ctx->root_path) + strlen(st->name) + strlen(ch->name);
     psize += 8;
 
     path = malloc(psize);
@@ -248,7 +236,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     }
 
     ret = snprintf(path, psize, "%s/%s/%s",
-                   ctx->root_path, st->name, name);
+                   ctx->root_path, st->name, ch->name);
     if (ret == -1) {
         cio_errno();
         free(path);
@@ -262,21 +250,11 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
         free(path);
         return NULL;
     }
-    cf->ctx = ctx;
     cf->flags = flags;
-    cf->st = st;
     cf->realloc_size = getpagesize() * 8;
     cf->st_content = NULL;
     cf->crc_cur = cio_crc32_init();
-
-    cf->name = strdup(name);
-    if (!cf->name) {
-        cio_errno();
-        free(path);
-        return NULL;
-    }
     cf->path = path;
-    mk_list_add(&cf->_head, &st->files);
 
     /* Open file descriptor */
     if (flags & CIO_OPEN) {
@@ -289,7 +267,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     if (cf->fd == -1) {
         cio_errno();
         cio_log_error(ctx, "cannot open/create %s", path);
-        cio_file_close(cf);
+        cio_file_close(ch);
         return NULL;
     }
 
@@ -297,7 +275,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     ret = fstat(cf->fd, &fst);
     if (ret == -1) {
         cio_errno();
-        cio_file_close(cf);
+        cio_file_close(ch);
         return NULL;
     }
 
@@ -330,7 +308,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
         ret = cio_file_fs_size_change(cf, size);
         if (ret == -1) {
             cio_errno();
-            cio_file_close(cf);
+            cio_file_close(ch);
             return NULL;
         }
     }
@@ -341,7 +319,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     if (cf->map == MAP_FAILED) {
         cio_errno();
         cf->map = NULL;
-        cio_file_close(cf);
+        cio_file_close(ch);
         return NULL;
     }
     cf->alloc_size = size;
@@ -351,7 +329,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
         content_size = cio_file_st_get_content_size(cf->map, fs_size);
         if (content_size == -1) {
             cio_log_error(ctx, "invalid content size %s", path);
-            cio_file_close(cf);
+            cio_file_close(ch);
             return NULL;
         }
         cf->data_size = content_size;
@@ -362,24 +340,25 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
         cf->fs_size = 0;
     }
 
-    cio_file_format_check(cf, flags);
+    cio_file_format_check(ch, cf, flags);
     cf->st_content = cio_file_st_get_content(cf->map);
-    cio_log_debug(ctx, "%s:%s mapped OK", st->name, cf->name);
+    cio_log_debug(ctx, "%s:%s mapped OK", st->name, ch->name);
 
     return cf;
 }
 
-void cio_file_close(struct cio_file *cf)
+void cio_file_close(struct cio_chunk *ch)
 {
     int ret;
+    struct cio_file *cf = (struct cio_file *) ch->backend;
 
     /* check if the file needs to be synchronized */
     if (cf->synced == CIO_FALSE && cf->map) {
-        ret = cio_file_sync(cf);
+        ret = cio_file_sync(ch);
         if (ret == -1) {
-            cio_log_error(cf->ctx,
+            cio_log_error(ch->ctx,
                           "[cio file] error doing file sync on close at "
-                          "%s:%s", cf->st->name, cf->name);
+                          "%s:%s", ch->st->name, ch->name);
         }
     }
 
@@ -389,13 +368,11 @@ void cio_file_close(struct cio_file *cf)
     }
 
     close(cf->fd);
-    mk_list_del(&cf->_head);
-    free(cf->name);
     free(cf->path);
     free(cf);
 }
 
-int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
+int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
 {
     int ret;
     size_t meta_len;
@@ -403,6 +380,7 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
     void *tmp;
     size_t av_size;
     size_t new_size;
+    struct cio_file *cf = (struct cio_file *) ch->backend;
 
     if (count == 0) {
         /* do nothing */
@@ -416,7 +394,7 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
     if (count > av_size) {
         if (av_size + cf->realloc_size < count) {
             new_size = cf->alloc_size + count;
-            cio_log_debug(cf->ctx,
+            cio_log_debug(ch->ctx,
                           "[cio file] realloc size is not big enough "
                           "for incoming data, consider to increase it");
         }
@@ -429,7 +407,7 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
                      new_size, MREMAP_MAYMOVE);
         if (tmp == MAP_FAILED) {
             cio_errno();
-            cio_log_error(cf->ctx,
+            cio_log_error(ch->ctx,
                           "[cio file] data exceeds available space "
                           "(alloc=%lu current_size=%lu write_size=%lu)",
                           cf->alloc_size, cf->data_size, count);
@@ -437,7 +415,7 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
         }
 
         cf->map = tmp;
-        cio_log_debug(cf->ctx,
+        cio_log_debug(ch->ctx,
                       "[cio file] alloc_size from %lu to %lu",
                       cf->alloc_size, new_size);
         cf->alloc_size = new_size;
@@ -445,13 +423,13 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
         ret = cio_file_fs_size_change(cf, cf->alloc_size);
         if (ret == -1) {
             cio_errno();
-            cio_log_error(cf->ctx,
+            cio_log_error(ch->ctx,
                           "[cio_file] error setting new file size on write");
             return -1;
         }
     }
 
-    if (cf->ctx->flags & CIO_CHECKSUM) {
+    if (ch->ctx->flags & CIO_CHECKSUM) {
         update_checksum(cf, (unsigned char *) buf, count);
     }
 
@@ -464,13 +442,14 @@ int cio_file_write(struct cio_file *cf, const void *buf, size_t count)
     return 0;
 }
 
-int cio_file_sync(struct cio_file *cf)
+int cio_file_sync(struct cio_chunk *ch)
 {
     int ret;
     int sync_mode;
     size_t av_size;
     size_t size;
     struct stat fst;
+    struct cio_file *cf = (struct cio_file *) ch->backend;
 
     if (cf->flags & CIO_OPEN_RD) {
         return 0;
@@ -493,9 +472,9 @@ int cio_file_sync(struct cio_file *cf)
         ret = cio_file_fs_size_change(cf, size);
         if (ret == -1) {
             cio_errno();
-            cio_log_error(cf->ctx,
+            cio_log_error(ch->ctx,
                           "[cio file sync] error adjusting size at: "
-                          " %s/%s", cf->st->name, cf->name);
+                          " %s/%s", ch->st->name, ch->name);
         }
         cf->alloc_size = size;
     }
@@ -503,19 +482,19 @@ int cio_file_sync(struct cio_file *cf)
         ret = cio_file_fs_size_change(cf, cf->alloc_size);
         if (ret == -1) {
             cio_errno();
-            cio_log_error(cf->ctx,
+            cio_log_error(ch->ctx,
                           "[cio file sync] error adjusting size at: "
-                          " %s/%s", cf->st->name, cf->name);
+                          " %s/%s", ch->st->name, ch->name);
         }
     }
 
     /* Finalize CRC32 checksum */
-    if (cf->ctx->flags & CIO_CHECKSUM) {
+    if (ch->ctx->flags & CIO_CHECKSUM) {
         finalize_checksum(cf);
     }
 
     /* Sync mode */
-    if (cf->ctx->flags & CIO_FULL_SYNC) {
+    if (ch->ctx->flags & CIO_FULL_SYNC) {
         sync_mode = MS_SYNC;
     }
     else {
@@ -530,8 +509,8 @@ int cio_file_sync(struct cio_file *cf)
     }
 
     cf->synced = CIO_TRUE;
-    cio_log_debug(cf->ctx, "[cio file] synced at: %s/%s",
-                  cf->st->name, cf->name);
+    cio_log_debug(ch->ctx, "[cio file] synced at: %s/%s",
+                  ch->st->name, ch->name);
     return 0;
 }
 
@@ -559,24 +538,9 @@ int cio_file_fs_size_change(struct cio_file *cf, size_t new_size)
 }
 
 /* Set a reallocation chunk size */
-void cio_file_realloc_size(struct cio_file *cf, size_t chunk_size)
+static void cio_file_realloc_size(struct cio_file *cf, size_t chunk_size)
 {
     cf->realloc_size = chunk_size;
-}
-
-/* Close all files owned by the given stream */
-int cio_file_close_stream(struct cio_stream *st)
-{
-    struct mk_list *tmp;
-    struct mk_list *head;
-    struct cio_file *cf;
-
-    mk_list_foreach_safe(head, tmp, &st->files) {
-        cf = mk_list_entry(head, struct cio_file, _head);
-        cio_file_close(cf);
-    }
-
-    return 0;
 }
 
 char *cio_file_hash(struct cio_file *cf)
@@ -588,4 +552,53 @@ void cio_file_hash_print(struct cio_file *cf)
 {
     printf("crc cur=%lu\n", cf->crc_cur);
     printf("%08lx\n", (long unsigned int ) cf->crc_cur);
+}
+
+/* Dump files from given stream */
+void cio_file_scan_dump(struct cio_ctx *ctx, struct cio_stream *st)
+{
+    int meta_len;
+    char *p;
+    crc_t crc;
+    crc_t crc_fs;
+    char tmp[PATH_MAX];
+    struct mk_list *head;
+    struct cio_chunk *ch;
+    struct cio_file *cf;
+
+    mk_list_foreach(head, &st->files) {
+        ch = mk_list_entry(head, struct cio_chunk, _head);
+        cf = ch->backend;
+
+        snprintf(tmp, sizeof(tmp) -1, "%s/%s", st->name, ch->name);
+
+        meta_len = cio_file_st_get_meta_len(cf->map);
+
+        p = cio_file_st_get_hash(cf->map);
+
+        memcpy(&crc_fs, p, sizeof(crc_fs));
+        crc_fs = ntohl(crc_fs);
+
+        printf("        %-60s", tmp);
+
+        /*
+         * the crc32 specified in the file is stored in 'val' now, if
+         * checksum mode is enabled we have to verify it.
+         */
+        if (ctx->flags & CIO_CHECKSUM) {
+            cio_file_calculate_checksum(cf, &crc);
+
+            /*
+             * finalize the checksum and compare it value using the
+             * host byte order.
+             */
+            crc = cio_crc32_finalize(crc);
+            if (crc != crc_fs) {
+                printf("checksum error=%08x expected=%08x, ",
+                       (uint32_t) crc_fs, (uint32_t) crc);
+            }
+        }
+        printf("meta_len=%d, data_size=%lu, crc=%08x\n",
+               meta_len, cf->data_size, (uint32_t) crc_fs);
+    }
 }

@@ -31,6 +31,10 @@
 #define CIO_INFO   3
 #define CIO_DEBUG  4
 
+/* Storage backend */
+#define CIO_STORE_FS    0
+#define CIO_STORE_MEM   1
+
 /* flags */
 #define CIO_OPEN        1   /* open/create file reference */
 #define CIO_OPEN_RD     2   /* open and read/mmap content if exists */

@@ -21,7 +21,8 @@
 #define CIO_META_H
 
 #include <chunkio/cio_file.h>
+#include <chunkio/cio_chunk.h>
 
-int cio_meta_write(struct cio_file *cf, char *buf, size_t size);
+int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size);
 
 #endif

@@ -25,7 +25,7 @@
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_os.h>
 #include <chunkio/cio_log.h>
-#include <chunkio/cio_file.h>
+#include <chunkio/cio_chunk.h>
 #include <chunkio/cio_stream.h>
 
 #include <monkey/mk_core/mk_list.h>
@@ -70,7 +70,8 @@ static int check_stream_path(struct cio_ctx *ctx, const char *path)
     return ret;
 }
 
-struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name)
+struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name,
+                                     int type)
 {
     int ret;
     int len;
@@ -92,9 +93,12 @@ struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name)
         return NULL;
     }
 
-    ret = check_stream_path(ctx, name);
-    if (ret == -1) {
-        return NULL;
+    /* If backend is the file system, validate the stream path */
+    if (type == CIO_STORE_FS) {
+        ret = check_stream_path(ctx, name);
+        if (ret == -1) {
+            return NULL;
+        }
     }
 
     st = malloc(sizeof(struct cio_stream));
@@ -102,7 +106,7 @@ struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name)
         cio_errno();
         return NULL;
     }
-
+    st->type = type;
     st->name = strdup(name);
     if (!st->name) {
         cio_errno();
@@ -125,7 +129,7 @@ void cio_stream_destroy(struct cio_stream *st)
     struct cio_file *cf;
 
     /* close all files */
-    cio_file_close_stream(st);
+    cio_chunk_close_stream(st);
 
     /* destroy stream */
     mk_list_del(&st->_head);

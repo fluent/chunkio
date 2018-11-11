@@ -23,13 +23,15 @@
 #include <monkey/mk_core/mk_list.h>
 
 struct cio_stream {
+    int type;                 /* type: CIO_STORE_FS or CIO_STORE_MEM */
     char *name;               /* stream name */
     struct mk_list _head;     /* head link to ctx->streams list */
     struct mk_list files;
     void *parent;             /* ref to parent ctx */
 };
 
-struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name);
+struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name,
+                                     int type);
 void cio_stream_destroy(struct cio_stream *st);
 void cio_stream_destroy_all(struct cio_ctx *ctx);
 

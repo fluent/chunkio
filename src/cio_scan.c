@@ -27,6 +27,8 @@
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_file.h>
+#include <chunkio/cio_memfs.h>
+#include <chunkio/cio_chunk.h>
 #include <chunkio/cio_log.h>
 
 static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
@@ -36,7 +38,7 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
     char *path;
     DIR *dir;
     struct dirent *ent;
-    struct cio_file *cf;
+    struct cio_chunk *ch;
 
     len = strlen(ctx->root_path) + strlen(st->name) + 2;
     path = malloc(len);
@@ -73,7 +75,7 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
         }
 
         /* register every directory as a stream */
-        cf = cio_file_open(ctx, st, ent->d_name, CIO_OPEN_RD, 0);
+        ch = cio_chunk_open(ctx, st, ent->d_name, CIO_OPEN_RD, 0);
     }
 
     closedir(dir);
@@ -111,7 +113,7 @@ int cio_scan_streams(struct cio_ctx *ctx)
         }
 
         /* register every directory as a stream */
-        st = cio_stream_create(ctx, ent->d_name);
+        st = cio_stream_create(ctx, ent->d_name, CIO_STORE_FS);
         if (st) {
             ret = cio_scan_stream_files(ctx, st);
         }
@@ -139,42 +141,12 @@ void cio_scan_dump(struct cio_ctx *ctx)
         st = mk_list_entry(head, struct cio_stream, _head);
         printf(" stream:%-60s%i chunks\n",
                st->name, mk_list_size(&st->files));
-        mk_list_foreach(f_head, &st->files) {
-            cf = mk_list_entry(f_head, struct cio_file, _head);
-            snprintf(tmp, sizeof(tmp) -1, "%s/%s", st->name, cf->name);
 
-            meta_len = cio_file_st_get_meta_len(cf->map);
-
-            p = cio_file_st_get_hash(cf->map);
-            crc_t val;
-
-            memcpy(&val, p, sizeof(val));
-            val = ntohl(val);
-
-            printf("        %-60s", tmp);
-
-
-            /*
-             * the crc32 specified in the file is stored in 'val' now, if
-             * checksum mode is enabled we have to verify it.
-             */
-            if (ctx->flags & CIO_CHECKSUM) {
-                crc_t crc;
-                cio_file_calculate_checksum(cf, &crc);
-
-                /*
-                 * finalize the checksum and compare it value using the
-                 * host byte order.
-                 */
-                crc = cio_crc32_finalize(crc);
-                if (crc != val) {
-                    printf("checksum error=%08x expected=%08x, ",
-                           (uint32_t) val, (uint32_t) crc);
-                }
-            }
-
-            printf("meta_len=%d, data_size=%lu, crc=%08x\n",
-                   meta_len, cf->data_size, (uint32_t) val);
+        if (st->type == CIO_STORE_FS) {
+            cio_file_scan_dump(ctx, st);
+        }
+        else if (st->type == CIO_STORE_MEM) {
+            cio_memfs_scan_dump(ctx, st);
         }
     }
 }
