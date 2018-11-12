@@ -202,6 +202,7 @@ static int cb_cmd_list(struct cio_ctx *ctx)
 
 /* command/stdin: read data from STDIN and dump it into stream/file */
 static int cb_cmd_stdin(struct cio_ctx *ctx, const char *stream,
+                        int opt_buffer,
                         const char *fname, const char *metadata)
 {
     int fd;
@@ -214,7 +215,7 @@ static int cb_cmd_stdin(struct cio_ctx *ctx, const char *stream,
     struct cio_chunk *ch;
 
     /* Prepare stream and file contexts */
-    st = cio_stream_create(ctx, stream, CIO_STORE_FS);
+    st = cio_stream_create(ctx, stream, opt_buffer);
     if (!st) {
         cio_log_error(ctx, "cannot create stream\n");
         return -1;
@@ -305,7 +306,7 @@ static int time_diff(struct timespec *tm0, struct timespec *tm1,
     return 0;
 }
 
-static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile,
+static void cb_cmd_perf(struct cio_ctx *ctx, int opt_buffer, char *pfile,
                         char *metadata, int writes, int files)
 {
     int i;
@@ -327,7 +328,7 @@ static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile,
     struct timespec t_final;
 
     /* Create pref stream */
-    stream = cio_stream_create(ctx, "test-perf", CIO_STORE_FS);
+    stream = cio_stream_create(ctx, "test-perf", opt_buffer);
 
     /*
      * Load sample data file and with the same content through multiple write
@@ -365,7 +366,7 @@ static void cb_cmd_perf(struct cio_ctx *ctx, char *pfile,
         }
 
         for (j = 0; j < writes; j++) {
-            ret = cio_file_write(carr[i], in_data, in_size);
+            ret = cio_chunk_write(carr[i], in_data, in_size);
             if (ret == -1) {
                 exit(1);
             }
@@ -415,6 +416,7 @@ int main(int argc, char **argv)
     int opt_silent = CIO_FALSE;
     int opt_pwrites = 5;
     int opt_pfiles = 1000;
+    int opt_buffer = CIO_STORE_FS;
     int cmd_stdin = CIO_FALSE;
     int cmd_list = CIO_FALSE;
     int cmd_perf = CIO_FALSE;
@@ -437,6 +439,7 @@ int main(int argc, char **argv)
         {"stdin"      , no_argument      , NULL, 'i'},
         {"stream"     , required_argument, NULL, 's'},
         {"metadata"   , required_argument, NULL, 'm'},
+        {"memory"     , no_argument      , NULL, 'M'},
         {"perf"       , required_argument, NULL, 'p'},
         {"perf-writes", required_argument, NULL, 'w'},
         {"perf-files" , required_argument, NULL, 'e'},
@@ -447,7 +450,7 @@ int main(int argc, char **argv)
     /* Initialize signals */
     cio_signal_init();
 
-    while ((opt = getopt_long(argc, argv, "Fklr:p:w:e:Sis:m:f:vh",
+    while ((opt = getopt_long(argc, argv, "Fklr:p:w:e:Sis:m:Mf:vh",
                               long_opts, NULL)) != -1) {
         switch (opt) {
         case 'F':
@@ -485,6 +488,9 @@ int main(int argc, char **argv)
             break;
         case 'm':
             metadata = strdup(optarg);
+            break;
+        case 'M':
+            opt_buffer = CIO_STORE_MEM;
             break;
         case 'f':
             fname = strdup(optarg);
@@ -543,10 +549,11 @@ int main(int argc, char **argv)
             cio_help(EXIT_FAILURE);
         }
 
-        ret = cb_cmd_stdin(ctx, stream, fname, metadata);
+        ret = cb_cmd_stdin(ctx, stream, opt_buffer, fname, metadata);
     }
     else if (cmd_perf == CIO_TRUE) {
-        cb_cmd_perf(ctx, perf_file, metadata, opt_pwrites, opt_pfiles);
+        cb_cmd_perf(ctx, opt_buffer, perf_file, metadata, opt_pwrites,
+                    opt_pfiles);
         free(perf_file);
     }
     else {
