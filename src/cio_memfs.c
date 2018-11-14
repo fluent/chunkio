@@ -55,6 +55,7 @@ void cio_memfs_close(struct cio_chunk *ch)
 
     free(mf->name);
     free(mf->buf_data);
+    free(mf->meta_data);
     free(mf);
 }
 
