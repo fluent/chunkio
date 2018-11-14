@@ -73,6 +73,8 @@ static void cio_help(int rc)
     printf("  -r, --root[=PATH]\tset root path\n");
     printf("  -i, --stdin\t\tdump stdin data to stream/file\n");
     printf("  -s, --stream=STREAM\tset stream name\n");
+    printf("  -m, --metadata=INFO\tset metadata\n");
+    printf("  -M, --memory\trun in-memory mode\n");
     printf("  -l, --list\t\tlist environment content\n");
     printf("  -F, --full-sync\tforce data flush to disk\n");
     printf("  -k, --checksum\tenable CRC32 checksum\n");
@@ -562,6 +564,7 @@ int main(int argc, char **argv)
 
     free(stream);
     free(fname);
+    free(metadata);
     cio_destroy(ctx);
 
     return ret;
