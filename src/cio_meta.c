@@ -24,6 +24,7 @@
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_file.h>
 #include <chunkio/cio_file_st.h>
+#include <chunkio/cio_memfs.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_log.h>
 
@@ -80,6 +81,24 @@ int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
     size_t meta_av;
     void *tmp;
     struct cio_file *cf = ch->backend;
+    struct cio_memfs *mf;
+
+    /* Handle in-memory metadata */
+    if (ch->st->type == CIO_STORE_MEM) {
+        mf = (struct cio_memfs *) ch->backend;
+        if (mf->meta_data) {
+            free(mf->meta_data);
+        }
+
+        mf->meta_data = malloc(size);
+        if (!mf->meta_data) {
+            cio_errno();
+            return -1;
+        }
+        memcpy(mf->meta_data, buf, size);
+        mf->meta_len = size;
+        return 0;
+    }
 
     /* Get metadata pointer */
     meta = cio_file_st_get_meta(cf->map);
