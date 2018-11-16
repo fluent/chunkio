@@ -50,9 +50,6 @@
 static int adjust_layout(struct cio_chunk *ch,
                          struct cio_file *cf, size_t meta_size)
 {
-    int ret;
-    crc_t crc;
-
     cio_file_st_set_meta_len(cf->map, (uint16_t) meta_size);
 
     /* Update checksum */
@@ -74,9 +71,7 @@ int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
     char *meta;
     char *cur_content_data;
     char *new_content_data;
-    size_t diff;
     size_t new_size;
-    size_t content_size;
     size_t content_av;
     size_t meta_av;
     void *tmp;
@@ -112,7 +107,6 @@ int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
         memcpy(meta, buf, size);
 
         /* there are some remaining bytes, adjust.. */
-        diff = meta_av - size;
         cur_content_data = cio_file_st_get_content(cf->map);
         new_content_data = meta + size;
         memmove(new_content_data, cur_content_data, cf->data_size);
@@ -167,4 +161,6 @@ int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
     /* copy new metadata */
     memcpy(meta, buf, size);
     adjust_layout(ch, cf, size);
+
+    return 0;
 }
