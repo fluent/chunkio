@@ -38,7 +38,6 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
     char *path;
     DIR *dir;
     struct dirent *ent;
-    struct cio_chunk *ch;
 
     len = strlen(ctx->root_path) + strlen(st->name) + 2;
     path = malloc(len);
@@ -75,7 +74,7 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
         }
 
         /* register every directory as a stream */
-        ch = cio_chunk_open(ctx, st, ent->d_name, CIO_OPEN_RD, 0);
+        cio_chunk_open(ctx, st, ent->d_name, CIO_OPEN_RD, 0);
     }
 
     closedir(dir);
@@ -87,11 +86,9 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
 /* Given a cio context, scan it root_path and populate stream/files */
 int cio_scan_streams(struct cio_ctx *ctx)
 {
-    int ret;
     DIR *dir;
     struct dirent *ent;
     struct cio_stream *st;
-    struct cio_file *cf;
 
     dir = opendir(ctx->root_path);
     if (!dir) {
@@ -115,7 +112,7 @@ int cio_scan_streams(struct cio_ctx *ctx)
         /* register every directory as a stream */
         st = cio_stream_create(ctx, ent->d_name, CIO_STORE_FS);
         if (st) {
-            ret = cio_scan_stream_files(ctx, st);
+            cio_scan_stream_files(ctx, st);
         }
     }
 
@@ -125,14 +122,8 @@ int cio_scan_streams(struct cio_ctx *ctx)
 
 void cio_scan_dump(struct cio_ctx *ctx)
 {
-    int meta_len;
-    char *p;
-    char hash[41];
-    char tmp[PATH_MAX];
     struct mk_list *head;
-    struct mk_list *f_head;
     struct cio_stream *st;
-    struct cio_file *cf;
 
     cio_log_info(ctx, "scan dump of %s", ctx->root_path);
 
