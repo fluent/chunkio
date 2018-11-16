@@ -124,10 +124,6 @@ struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name,
 
 void cio_stream_destroy(struct cio_stream *st)
 {
-    struct mk_list *tmp;
-    struct mk_list *head;
-    struct cio_file *cf;
-
     /* close all files */
     cio_chunk_close_stream(st);
 
