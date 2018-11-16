@@ -48,7 +48,7 @@ void cio_log_print(void *ctx, int level, const char *file, int line,
     }
     va_end(args);
 
-    cio->log_cb(ctx, file, line, buf);
+    cio->log_cb(ctx, level, file, line, buf);
 }
 
 int cio_errno_print(int errnum, const char *file, int line)

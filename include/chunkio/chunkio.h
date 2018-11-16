@@ -49,7 +49,7 @@ struct cio_ctx {
 
     /* logging */
     int log_level;
-    void (*log_cb)(void *, const char *, int, const char *);
+    void (*log_cb)(void *, int, const char *, int, const char *);
 
     /* streams */
     struct mk_list streams;
