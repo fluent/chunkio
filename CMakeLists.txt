@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 2.8)
 project(chunk-io)
 
+# CFLAGS
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -fPIC ")
+
 # Set __FILENAME__
 if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Windows")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D__FILENAME__='\"$(subst ${CMAKE_SOURCE_DIR}/,,$(abspath $<))\"'")
