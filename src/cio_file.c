@@ -63,7 +63,6 @@ static size_t content_len(struct cio_file *cf)
 {
     int meta;
     size_t len;
-    void *in_data;
 
     meta = cio_file_st_get_meta_len(cf->map);
     len = 2 + meta + cf->data_size;
@@ -78,7 +77,7 @@ void cio_file_calculate_checksum(struct cio_file *cf, crc_t *out)
     unsigned char *in_data;
 
     len = content_len(cf);
-    in_data = cf->map + CIO_FILE_CONTENT_OFFSET;
+    in_data = (unsigned char *) cf->map + CIO_FILE_CONTENT_OFFSET;
 
     val = cio_crc32_update(cf->crc_cur, in_data, len);
     *out = val;
@@ -89,8 +88,6 @@ static void update_checksum(struct cio_file *cf,
                             unsigned char *data, size_t len)
 {
     crc_t crc;
-    uint32_t hcrc;
-    void *in_data;
 
     crc = cio_crc32_update(cf->crc_cur, data, len);
     memcpy(cf->map + 2, &crc, sizeof(crc));
@@ -207,7 +204,6 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
                                int flags,
                                size_t size)
 {
-    int fd;
     int psize;
     int ret;
     int len;
@@ -375,8 +371,6 @@ void cio_file_close(struct cio_chunk *ch)
 int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
 {
     int ret;
-    size_t meta_len;
-    char *p;
     void *tmp;
     size_t av_size;
     size_t new_size;
@@ -535,12 +529,6 @@ int cio_file_fs_size_change(struct cio_file *cf, size_t new_size)
     }
 
     return ret;
-}
-
-/* Set a reallocation chunk size */
-static void cio_file_realloc_size(struct cio_file *cf, size_t chunk_size)
-{
-    cf->realloc_size = chunk_size;
 }
 
 char *cio_file_hash(struct cio_file *cf)
