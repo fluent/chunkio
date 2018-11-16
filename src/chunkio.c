@@ -60,6 +60,7 @@ struct cio_ctx *cio_create(const char *root_path,
     struct cio_ctx *ctx;
 
     if (log_level < CIO_ERROR || log_level > CIO_DEBUG) {
+        fprintf(stderr, "[cio] invalid log level, aborting");
         return NULL;
     }
 
@@ -73,29 +74,31 @@ struct cio_ctx *cio_create(const char *root_path,
     }
     cio_set_log_callback(ctx, log_cb);
     cio_set_log_level(ctx, log_level);
+    mk_list_init(&ctx->streams);
 
     ctx->flags = flags;
 
     /* Check or initialize file system root path */
-    ret = check_root_path(ctx, root_path);
-    if (ret == -1) {
-        cio_log_error(ctx,
-                      "[chunkio] cannot initialize root path %s\n",
-                      root_path);
-        free(ctx);
-        return NULL;
+    if (root_path) {
+        ret = check_root_path(ctx, root_path);
+        if (ret == -1) {
+            cio_log_error(ctx,
+                          "[chunkio] cannot initialize root path %s\n",
+                          root_path);
+            free(ctx);
+            return NULL;
+        }
+
+        ctx->root_path = strdup(root_path);
+    }
+    else {
+        ctx->root_path = NULL;
     }
 
-    ctx->root_path = strdup(root_path);
-    if (!ctx->root_path) {
-        perror("strdup");
-        free(ctx);
-        return NULL;
+    if (ctx->root_path) {
+        cio_scan_streams(ctx);
     }
 
-    mk_list_init(&ctx->streams);
-
-    cio_scan_streams(ctx);
     return ctx;
 }
 
