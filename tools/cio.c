@@ -74,7 +74,7 @@ static void cio_help(int rc)
     printf("  -i, --stdin\t\tdump stdin data to stream/file\n");
     printf("  -s, --stream=STREAM\tset stream name\n");
     printf("  -m, --metadata=INFO\tset metadata\n");
-    printf("  -M, --memory\trun in-memory mode\n");
+    printf("  -M, --memory\t\trun in-memory mode\n");
     printf("  -l, --list\t\tlist environment content\n");
     printf("  -F, --full-sync\tforce data flush to disk\n");
     printf("  -k, --checksum\tenable CRC32 checksum\n");
@@ -315,15 +315,12 @@ static void cb_cmd_perf(struct cio_ctx *ctx, int opt_buffer, char *pfile,
     int j;
     int meta_len = 0;
     int ret;
-    int flags;
     uint64_t bytes = 0;
     double rate;
     char *in_data;
     size_t in_size;
     char tmp[255];
-    char *perf_path = "/tmp/cio-perf/";
     struct cio_stream *stream;
-    struct cio_chunk *chunk;
     struct cio_chunk **carr;
     struct timespec t1;
     struct timespec t2;
