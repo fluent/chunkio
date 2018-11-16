@@ -102,10 +102,6 @@ int cio_memfs_write(struct cio_chunk *ch, const void *buf, size_t count)
 
 void cio_memfs_scan_dump(struct cio_ctx *ctx, struct cio_stream *st)
 {
-    int meta_len;
-    char *p;
-    crc_t crc;
-    crc_t crc_fs;
     char tmp[PATH_MAX];
     struct mk_list *head;
     struct cio_memfs *mf;
