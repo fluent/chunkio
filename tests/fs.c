@@ -155,7 +155,6 @@ static void test_fs_checksum()
     char *in_data;
     char *f_hash;
     size_t in_size;
-    crc_t crc;
     uint32_t val;
     struct cio_ctx *ctx;
     struct cio_stream *stream;
