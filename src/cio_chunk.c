@@ -149,3 +149,23 @@ char *cio_chunk_hash(struct cio_chunk *ch)
 
     return NULL;
 }
+
+int cio_chunk_lock(struct cio_chunk *ch)
+{
+    if (ch->lock == CIO_TRUE) {
+        return -1;
+    }
+
+    ch->lock = CIO_TRUE;
+    return 0;
+}
+
+int cio_chunk_unlock(struct cio_chunk *ch)
+{
+    if (ch->lock == CIO_FALSE) {
+        return -1;
+    }
+
+    ch->lock = CIO_FALSE;
+    return 0;
+}
