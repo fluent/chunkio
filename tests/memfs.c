@@ -49,7 +49,6 @@ static void test_memfs_write()
 {
     int i;
     int ret;
-    int len;
     int n_files = 100;
     int flags;
     char *in_data;
@@ -111,7 +110,7 @@ static void test_memfs_write()
 
 
     for (i = 0; i < n_files; i++) {
-        len = snprintf(tmp, sizeof(tmp), "api-test-%04i.txt", i);
+        snprintf(tmp, sizeof(tmp), "api-test-%04i.txt", i);
         carr[i] = cio_chunk_open(ctx, stream, tmp, CIO_OPEN, 1000000);
 
         if (carr[i] == NULL) {
