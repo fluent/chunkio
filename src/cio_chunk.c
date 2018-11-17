@@ -124,6 +124,25 @@ int cio_chunk_sync(struct cio_chunk *ch)
     return ret;
 }
 
+ssize_t cio_chunk_content_size(struct cio_chunk *ch)
+{
+    int type;
+    struct cio_memfs *mf;
+    struct cio_file *cf;
+
+    type = ch->st->type;
+    if (type == CIO_STORE_MEM) {
+        mf = ch->backend;
+        return mf->buf_len;
+    }
+    else if (type == CIO_STORE_FS) {
+        cf = ch->backend;
+        return cf->data_size;
+    }
+
+    return -1;
+}
+
 void cio_chunk_close_stream(struct cio_stream *st)
 {
     struct mk_list *tmp;
@@ -168,4 +187,9 @@ int cio_chunk_unlock(struct cio_chunk *ch)
 
     ch->lock = CIO_FALSE;
     return 0;
+}
+
+int cio_chunk_is_locked(struct cio_chunk *ch)
+{
+    return ch->lock;
 }

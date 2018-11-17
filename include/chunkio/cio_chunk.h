@@ -20,6 +20,8 @@
 #ifndef CIO_CHUNK_H
 #define CIO_CHUNK_H
 
+#include <unistd.h>
+
 struct cio_chunk {
     int lock;                 /* locked for write operations ? */
     char *name;               /* chunk name */
@@ -34,9 +36,11 @@ struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,
 void cio_chunk_close(struct cio_chunk *ch);
 int cio_chunk_write(struct cio_chunk *ch, const void *buf, size_t count);
 int cio_chunk_sync(struct cio_chunk *ch);
+ssize_t cio_chunk_content_size(struct cio_chunk *ch);
 void cio_chunk_close_stream(struct cio_stream *st);
 char *cio_chunk_hash(struct cio_chunk *ch);
 int cio_chunk_lock(struct cio_chunk *ch);
 int cio_chunk_unlock(struct cio_chunk *ch);
+int cio_chunk_is_locked(struct cio_chunk *ch);
 
 #endif

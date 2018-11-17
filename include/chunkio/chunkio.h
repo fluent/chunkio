@@ -55,6 +55,9 @@ struct cio_ctx {
     struct mk_list streams;
 };
 
+#include <chunkio/cio_stream.h>
+#include <chunkio/cio_chunk.h>
+
 struct cio_ctx *cio_create(const char *root_path,
                            void (*log_cb), int log_level, int flags);
 void cio_destroy(struct cio_ctx *ctx);
