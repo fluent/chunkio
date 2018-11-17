@@ -24,5 +24,6 @@
 #include <chunkio/cio_chunk.h>
 
 int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size);
+int cio_meta_cmp(struct cio_chunk *ch, char *meta_buf, int meta_len);
 
 #endif

@@ -164,3 +164,48 @@ int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
 
     return 0;
 }
+
+int cio_meta_cmp(struct cio_chunk *ch, char *meta_buf, int meta_len)
+{
+    int len;
+    char *meta;
+    struct cio_file *cf = ch->backend;
+    struct cio_memfs *mf;
+
+    /* In-memory type */
+    if (ch->st->type == CIO_STORE_MEM) {
+        mf = (struct cio_memfs *) ch->backend;
+
+        /* no metadata */
+        if (!mf->meta_data) {
+            return -1;
+        }
+
+        /* different lengths */
+        if (mf->meta_len != meta_len) {
+            return -1;
+        }
+
+        /* perfect match */
+        if (memcmp(mf->meta_data, meta_buf, meta_len) == 0) {
+            return 0;
+        }
+
+        return -1;
+    }
+
+
+    /* File system type */
+    len = cio_file_st_get_meta_len(cf->map);
+    if (len != meta_len) {
+        return -1;
+    }
+
+    /* compare metadata */
+    meta = cio_file_st_get_meta(cf->map);
+    if (memcmp(meta, meta_buf, meta_len) == 0) {
+        return 0;
+    }
+
+    return -1;
+}
