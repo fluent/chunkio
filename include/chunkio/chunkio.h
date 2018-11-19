@@ -65,4 +65,8 @@ void cio_destroy(struct cio_ctx *ctx);
 void cio_set_log_callback(struct cio_ctx *ctx, void (*log_cb));
 int cio_set_log_level(struct cio_ctx *ctx, int level);
 
+
+int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size);
+int cio_meta_cmp(struct cio_chunk *ch, char *meta_buf, int meta_len);
+
 #endif

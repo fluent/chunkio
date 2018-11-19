@@ -46,7 +46,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
                                struct cio_chunk *ch,
                                int flags,
                                size_t size);
-void cio_file_close(struct cio_chunk *ch);
+void cio_file_close(struct cio_chunk *ch, int delete);
 int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count);
 int cio_file_sync(struct cio_chunk *ch);
 int cio_file_fs_size_change(struct cio_file *cf, size_t new_size);

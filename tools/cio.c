@@ -267,7 +267,7 @@ static int cb_cmd_stdin(struct cio_ctx *ctx, const char *stream,
 
     /* synchronize changes to disk and close */
     cio_chunk_sync(ch);
-    cio_chunk_close(ch);
+    cio_chunk_close(ch, CIO_FALSE);
 
     /* print some status */
     cio_bytes_to_human_readable_size(total, buf, sizeof(buf) - 1);
@@ -372,7 +372,7 @@ static void cb_cmd_perf(struct cio_ctx *ctx, int opt_buffer, char *pfile,
             bytes += in_size;
         }
         cio_chunk_sync(carr[i]);
-        cio_chunk_close(carr[i]);
+        cio_chunk_close(carr[i], CIO_FALSE);
     }
     timespec_get(&t2, TIME_UTC);
 

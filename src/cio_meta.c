@@ -78,6 +78,10 @@ int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
     struct cio_file *cf = ch->backend;
     struct cio_memfs *mf;
 
+    if (size > 65535) {
+        return -1;
+    }
+
     /* Handle in-memory metadata */
     if (ch->st->type == CIO_STORE_MEM) {
         mf = (struct cio_memfs *) ch->backend;

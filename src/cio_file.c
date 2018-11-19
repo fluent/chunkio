@@ -263,7 +263,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     if (cf->fd == -1) {
         cio_errno();
         cio_log_error(ctx, "cannot open/create %s", path);
-        cio_file_close(ch);
+        cio_file_close(ch, CIO_FALSE);
         return NULL;
     }
 
@@ -271,7 +271,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     ret = fstat(cf->fd, &fst);
     if (ret == -1) {
         cio_errno();
-        cio_file_close(ch);
+        cio_file_close(ch, CIO_FALSE);
         return NULL;
     }
 
@@ -304,7 +304,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
         ret = cio_file_fs_size_change(cf, size);
         if (ret == -1) {
             cio_errno();
-            cio_file_close(ch);
+            cio_file_close(ch, CIO_TRUE);
             return NULL;
         }
     }
@@ -315,7 +315,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     if (cf->map == MAP_FAILED) {
         cio_errno();
         cf->map = NULL;
-        cio_file_close(ch);
+        cio_file_close(ch, CIO_TRUE);
         return NULL;
     }
     cf->alloc_size = size;
@@ -325,7 +325,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
         content_size = cio_file_st_get_content_size(cf->map, fs_size);
         if (content_size == -1) {
             cio_log_error(ctx, "invalid content size %s", path);
-            cio_file_close(ch);
+            cio_file_close(ch, CIO_TRUE);
             return NULL;
         }
         cf->data_size = content_size;
@@ -343,7 +343,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     return cf;
 }
 
-void cio_file_close(struct cio_chunk *ch)
+void cio_file_close(struct cio_chunk *ch, int delete)
 {
     int ret;
     struct cio_file *cf = (struct cio_file *) ch->backend;
@@ -362,8 +362,18 @@ void cio_file_close(struct cio_chunk *ch)
     if (cf->map) {
         munmap(cf->map, cf->alloc_size);
     }
-
     close(cf->fd);
+
+    if (delete == CIO_TRUE) {
+        ret = unlink(cf->path);
+        if (ret == -1) {
+            cio_errno();
+            cio_log_error(ch->ctx,
+                          "[cio file] error deleting file at close %s:%s",
+                          ch->st->name, ch->name);
+        }
+    }
+
     free(cf->path);
     free(cf);
 }

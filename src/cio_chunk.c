@@ -78,13 +78,13 @@ struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,
     return ch;
 }
 
-void cio_chunk_close(struct cio_chunk *ch)
+void cio_chunk_close(struct cio_chunk *ch, int delete)
 {
     int type;
 
     type = ch->st->type;
     if (type == CIO_STORE_FS) {
-        cio_file_close(ch);
+        cio_file_close(ch, delete);
     }
     else if (type == CIO_STORE_MEM) {
         cio_memfs_close(ch);
@@ -124,7 +124,48 @@ int cio_chunk_sync(struct cio_chunk *ch)
     return ret;
 }
 
-ssize_t cio_chunk_content_size(struct cio_chunk *ch)
+void *cio_chunk_get_content(struct cio_chunk *ch, size_t *size)
+{
+    int type;
+    struct cio_memfs *mf;
+    struct cio_file *cf;
+
+    type = ch->st->type;
+    if (type == CIO_STORE_MEM) {
+        mf = ch->backend;
+        *size = mf->buf_len;
+        return mf->buf_data;
+    }
+    else if (type == CIO_STORE_FS) {
+        cf = ch->backend;
+        *size = cf->data_size;
+        return cio_file_st_get_content(cf->map);
+    }
+
+    return NULL;
+}
+
+size_t cio_chunk_get_content_end_pos(struct cio_chunk *ch)
+{
+    int type;
+    off_t pos = 0;
+    struct cio_memfs *mf;
+    struct cio_file *cf;
+
+    type = ch->st->type;
+    if (type == CIO_STORE_MEM) {
+        mf = ch->backend;
+        pos = (off_t) (mf->buf_data + mf->buf_len);
+    }
+    else if (type == CIO_STORE_FS) {
+        cf = ch->backend;
+        pos = (off_t) (cio_file_st_get_content(cf->map) + cf->data_size);
+    }
+
+    return pos;
+}
+
+ssize_t cio_chunk_get_content_size(struct cio_chunk *ch)
 {
     int type;
     struct cio_memfs *mf;
@@ -152,7 +193,7 @@ void cio_chunk_close_stream(struct cio_stream *st)
     mk_list_foreach_safe(head, tmp, &st->files) {
         ch = mk_list_entry(head, struct cio_chunk, _head);
         if (st->type == CIO_STORE_FS) {
-            cio_file_close(ch);
+            cio_file_close(ch, CIO_FALSE);
         }
         else if (st->type == CIO_STORE_MEM) {
             cio_memfs_close(ch);
