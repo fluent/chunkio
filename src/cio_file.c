@@ -56,7 +56,7 @@ char cio_file_init_bytes[] =   {
     0x00, 0x00
 };
 
-#define round_up(a, b)  (a + (b - (a % b)))
+#define ROUND_UP(N, S) ((((N) + (S) - 1) / (S)) * (S))
 
 /* Get the number of bytes in the Content section */
 static size_t content_len(struct cio_file *cf)
@@ -300,7 +300,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
         }
 
         /* For empty files, make room in the file system */
-        size = round_up(size, cio_page_size);
+        size = ROUND_UP(size, cio_page_size);
         ret = cio_file_fs_size_change(cf, size);
         if (ret == -1) {
             cio_errno();
@@ -310,7 +310,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     }
 
     /* Map the file */
-    size = round_up(size, cio_page_size);
+    size = ROUND_UP(size, cio_page_size);
     cf->map = mmap(0, size, oflags, MAP_SHARED, cf->fd, 0);
     if (cf->map == MAP_FAILED) {
         cio_errno();
@@ -406,7 +406,15 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
             new_size = cf->alloc_size + cf->realloc_size;
         }
 
-        new_size = round_up(new_size, cio_page_size);
+        new_size = ROUND_UP(new_size, cio_page_size);
+        ret = cio_file_fs_size_change(cf, new_size);
+        if (ret == -1) {
+            cio_errno();
+            cio_log_error(ch->ctx,
+                          "[cio_file] error setting new file size on write");
+            return -1;
+        }
+
         tmp = mremap(cf->map, cf->alloc_size,
                      new_size, MREMAP_MAYMOVE);
         if (tmp == MAP_FAILED) {
@@ -418,19 +426,12 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
             return -1;
         }
 
-        cf->map = tmp;
         cio_log_debug(ch->ctx,
                       "[cio file] alloc_size from %lu to %lu",
                       cf->alloc_size, new_size);
-        cf->alloc_size = new_size;
 
-        ret = cio_file_fs_size_change(cf, cf->alloc_size);
-        if (ret == -1) {
-            cio_errno();
-            cio_log_error(ch->ctx,
-                          "[cio_file] error setting new file size on write");
-            return -1;
-        }
+        cf->map = tmp;
+        cf->alloc_size = new_size;
     }
 
     if (ch->ctx->flags & CIO_CHECKSUM) {
@@ -522,6 +523,10 @@ int cio_file_sync(struct cio_chunk *ch)
 int cio_file_fs_size_change(struct cio_file *cf, size_t new_size)
 {
     int ret;
+
+    if (new_size == cf->alloc_size) {
+        return 0;
+    }
 
     if (new_size > cf->alloc_size) {
         /*
