@@ -56,6 +56,11 @@ struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,
     ch->name = strdup(name);
     ch->ctx = ctx;
     ch->st = st;
+    ch->lock = CIO_FALSE;
+    ch->tx_active = CIO_FALSE;
+    ch->tx_crc = 0;
+    ch->tx_content_length = 0;
+
     mk_list_add(&ch->_head, &st->files);
 
     /* create backend context */
@@ -93,6 +98,35 @@ void cio_chunk_close(struct cio_chunk *ch, int delete)
     mk_list_del(&ch->_head);
     free(ch->name);
     free(ch);
+}
+
+/*
+ * Write at a specific offset of the content area. Offset must be >= 0 and
+ * less than current data length.
+ */
+int cio_chunk_write_at(struct cio_chunk *ch, off_t offset,
+                       const void *buf, size_t count)
+{
+    int ret;
+    int type;
+    struct cio_memfs *mf;
+    struct cio_file *cf;
+
+    type = ch->st->type;
+    if (type == CIO_STORE_FS) {
+        cf = ch->backend;
+        cf->data_size = offset;
+    }
+    else if (type == CIO_STORE_MEM) {
+        mf = ch->backend;
+        mf->buf_len = offset;
+    }
+
+    /*
+     * By default backends (fs, mem) appends data after the it last position,
+     * so we just adjust the content size to the given offset.
+     */
+    return cio_chunk_write(ch, buf, count);
 }
 
 int cio_chunk_write(struct cio_chunk *ch, const void *buf, size_t count)
@@ -233,4 +267,82 @@ int cio_chunk_unlock(struct cio_chunk *ch)
 int cio_chunk_is_locked(struct cio_chunk *ch)
 {
     return ch->lock;
+}
+
+/*
+ * Start a transaction context: it keep a state of the current calculated
+ * CRC32 (if enabled) and the current number of bytes in the content
+ * area.
+ */
+int cio_chunk_tx_begin(struct cio_chunk *ch)
+{
+    int type;
+    struct cio_memfs *mf;
+    struct cio_file *cf;
+
+    if (cio_chunk_is_locked(ch)) {
+        return -1;
+    }
+
+    if (ch->tx_active == CIO_TRUE) {
+        return -1;
+    }
+
+    ch->tx_active = CIO_TRUE;
+    type = ch->st->type;
+    if (type == CIO_STORE_MEM) {
+        mf = ch->backend;
+        ch->tx_crc = mf->crc_cur;
+        ch->tx_content_length = mf->buf_len;
+    }
+    else if (type == CIO_STORE_FS) {
+        cf = ch->backend;
+        ch->tx_crc = cf->crc_cur;
+        ch->tx_content_length = cf->data_size;
+    }
+}
+
+/*
+ * Commit transaction changes, reset transaction context and leave new
+ * changes in place.
+ */
+int cio_chunk_tx_commit(struct cio_chunk *ch)
+{
+    int ret;
+
+    ret = cio_chunk_sync(ch);
+    if (ret == -1) {
+        return -1;
+    }
+
+    ch->tx_active = CIO_FALSE;
+    return 0;
+}
+
+/*
+ * Drop changes done since a transaction was initiated */
+int cio_chunk_tx_rollback(struct cio_chunk *ch)
+{
+    int type;
+    struct cio_memfs *mf;
+    struct cio_file *cf;
+
+    if (ch->tx_active == CIO_TRUE) {
+        return -1;
+    }
+
+    type = ch->st->type;
+    if (type == CIO_STORE_MEM) {
+        mf = ch->backend;
+        mf->crc_cur = ch->tx_crc;
+        mf->buf_len = ch->tx_content_length;
+    }
+    else if (type == CIO_STORE_FS) {
+        cf = ch->backend;
+        cf->crc_cur = ch->tx_crc;
+        cf->data_size = ch->tx_content_length;
+    }
+
+    ch->tx_active = CIO_FALSE;
+    return 0;
 }

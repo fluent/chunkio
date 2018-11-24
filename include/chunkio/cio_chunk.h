@@ -21,11 +21,18 @@
 #define CIO_CHUNK_H
 
 #include <unistd.h>
+#include <inttypes.h>
 
 struct cio_chunk {
     int lock;                 /* locked for write operations ? */
     char *name;               /* chunk name */
     void *backend;            /* backend context (cio_file, cio_memfs) */
+
+    /* Transaction helpers */
+    int tx_active;            /* active transaction ?         */
+    uint32_t tx_crc;          /* CRC32 upon transaction begin */
+    off_t tx_content_length;  /* content length               */
+
     struct cio_ctx *ctx;      /* library context      */
     struct cio_stream *st;    /* stream context       */
     struct mk_list _head;     /* head link to stream->files */
@@ -35,6 +42,8 @@ struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,
                                  const char *name, int flags, size_t size);
 void cio_chunk_close(struct cio_chunk *ch, int delete);
 int cio_chunk_write(struct cio_chunk *ch, const void *buf, size_t count);
+int cio_chunk_write_at(struct cio_chunk *ch, off_t offset,
+                       const void *buf, size_t count);
 int cio_chunk_sync(struct cio_chunk *ch);
 void *cio_chunk_get_content(struct cio_chunk *ch, size_t *size);
 ssize_t cio_chunk_get_content_size(struct cio_chunk *ch);
@@ -44,5 +53,10 @@ char *cio_chunk_hash(struct cio_chunk *ch);
 int cio_chunk_lock(struct cio_chunk *ch);
 int cio_chunk_unlock(struct cio_chunk *ch);
 int cio_chunk_is_locked(struct cio_chunk *ch);
+
+/* transaction handling */
+int cio_chunk_tx_begin(struct cio_chunk *ch);
+int cio_chunk_tx_commit(struct cio_chunk *ch);
+int cio_chunk_tx_rollback(struct cio_chunk *ch);
 
 #endif
