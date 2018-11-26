@@ -107,7 +107,6 @@ void cio_chunk_close(struct cio_chunk *ch, int delete)
 int cio_chunk_write_at(struct cio_chunk *ch, off_t offset,
                        const void *buf, size_t count)
 {
-    int ret;
     int type;
     struct cio_memfs *mf;
     struct cio_file *cf;
@@ -300,6 +299,8 @@ int cio_chunk_tx_begin(struct cio_chunk *ch)
         ch->tx_crc = cf->crc_cur;
         ch->tx_content_length = cf->data_size;
     }
+
+    return 0;
 }
 
 /*
