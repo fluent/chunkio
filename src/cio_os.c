@@ -61,6 +61,9 @@ int cio_os_mkpath(const char *dir, mode_t mode)
     }
 
     dup_dir = strdup(dir);
+    if (!dup_dir) {
+        return 1;
+    }
     cio_os_mkpath(dirname(dup_dir), mode);
     free(dup_dir);
     return mkdir(dir, mode);
