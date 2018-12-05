@@ -49,7 +49,7 @@ int cio_os_isdir(const char *dir)
 int cio_os_mkpath(const char *dir, mode_t mode)
 {
     struct stat st;
-    char *dup_dir;
+    char *dup_dir = NULL;
 
     if (!dir) {
         errno = EINVAL;
