@@ -210,7 +210,7 @@ static void cio_timespec_get(struct timespec *t)
     t->tv_sec = mts.tv_sec;
     t->tv_nsec = mts.tv_nsec;
 #else
-    timespec_get(&t, TIME_UTC);
+    timespec_get(t, TIME_UTC);
 #endif
 }
 
