@@ -398,9 +398,6 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
     if (count > av_size) {
         if (av_size + cf->realloc_size < count) {
             new_size = cf->alloc_size + count;
-            cio_log_debug(ch->ctx,
-                          "[cio file] realloc size is not big enough "
-                          "for incoming data, consider to increase it");
         }
         else {
             new_size = cf->alloc_size + cf->realloc_size;
