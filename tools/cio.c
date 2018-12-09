@@ -458,6 +458,7 @@ int main(int argc, char **argv)
         {"stream"     , required_argument, NULL, 's'},
         {"metadata"   , required_argument, NULL, 'm'},
         {"memory"     , no_argument      , NULL, 'M'},
+        {"filename"   , required_argument, NULL, 'f'},
         {"perf"       , required_argument, NULL, 'p'},
         {"perf-writes", required_argument, NULL, 'w'},
         {"perf-files" , required_argument, NULL, 'e'},
