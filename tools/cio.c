@@ -19,7 +19,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
+#include <chunkio/chunkio_compat.h>
 #include <getopt.h>
 #include <string.h>
 #include <sys/types.h>

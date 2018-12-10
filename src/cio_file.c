@@ -24,7 +24,7 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <unistd.h>
+#include <chunkio/chunkio_compat.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
