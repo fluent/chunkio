@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <chunkio/chunkio_compat.h>
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_os.h>
