@@ -51,6 +51,7 @@ static inline char* dirname(const char *dir) {
 #  if !defined(S_ISREG) && defined(S_IFMT) && defined(S_IFREG)
 #    define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
 #  endif
+#  define strerror_r(errno,buf,len) strerror_s(buf,len,errno)
 inline int getpagesize(void)
 {
     SYSTEM_INFO system_info;
