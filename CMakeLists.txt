@@ -72,7 +72,9 @@ include_directories(
 
 add_subdirectory(deps/crc32)
 add_subdirectory(src)
-add_subdirectory(tools)
+if (NOT MSVC)
+  add_subdirectory(tools)
+endif()
 
 if(CIO_TESTS)
   add_subdirectory(tests)
