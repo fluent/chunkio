@@ -48,6 +48,9 @@ static inline char* dirname(const char *dir) {
 
     return path_buffer;
 }
+#  if !defined(S_ISREG) && defined(S_IFMT) && defined(S_IFREG)
+#    define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
+#  endif
 #else
 #  include <unistd.h>
 #endif
