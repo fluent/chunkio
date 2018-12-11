@@ -25,6 +25,7 @@
 #  define PATH_MAX MAX_PATH
 #  define ssize_t int
 #  include <winsock2.h>
+#  pragma comment(lib, "ws2_32.lib")
 #  include <windows.h>
 #  include <wchar.h>
 #  include <io.h>
