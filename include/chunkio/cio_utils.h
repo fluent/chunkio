@@ -20,7 +20,8 @@
 #ifndef CIO_UTILS_H
 #define CIO_UTILS_H
 
+#include <chunkio/chunkio_compat.h>
+
 int cio_utils_recursive_delete(const char *dir);
 int cio_utils_read_file(const char *path, char **buf, size_t *size);
-
 #endif
