@@ -21,9 +21,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#ifdef _WIN32
+#include <strsafe.h>
+#else
 #include <dirent.h>
 #include <arpa/inet.h>
+#endif
 
+#include <chunkio/chunkio_compat.h>
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_stream.h>
 #ifdef CIO_HAVE_BACKEND_FILESYSTEM
@@ -38,8 +43,14 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
     int len;
     int ret;
     char *path;
+#ifdef _WIN32
+    WIN32_FIND_DATA fd;
+    HANDLE h;
+    TCHAR szDir[PATH_MAX + 1];
+#else
     DIR *dir;
     struct dirent *ent;
+#endif
 
     len = strlen(ctx->root_path) + strlen(st->name) + 2;
     path = malloc(len);
@@ -55,15 +66,44 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
         return -1;
     }
 
+#ifdef _WIN32
+    StringCchCopy(szDir, PATH_MAX, path);
+    StringCchCat(szDir, PATH_MAX, TEXT("\\*"));
+    h = FindFirstFile(szDir, &fd);
+    if (INVALID_HANDLE_VALUE == h)
+    {
+        cio_errno();
+        free(path);
+        return -1;
+    }
+#else
     dir = opendir(path);
     if (!dir) {
         cio_errno();
         free(path);
         return -1;
     }
+#endif
 
     cio_log_debug(ctx, "[cio scan] opening stream %s", st->name);
 
+#ifdef _WIN32
+    do
+    {
+        if (fd.cFileName == '.' || (strcmp(fd.cFileName, "..") == 0)) {
+            continue;
+        }
+
+        /* Look just for directories */
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            continue;
+        }
+
+        /* register every directory as a stream */
+        cio_chunk_open(ctx, st, fd.cFileName, CIO_OPEN_RD, 0);
+    } while (FindNextFile(h, &fd));
+    FindClose(h);
+#else
     /* Iterate the root_path */
     while ((ent = readdir(dir)) != NULL) {
         if ((ent->d_name[0] == '.') || (strcmp(ent->d_name, "..") == 0)) {
@@ -78,8 +118,8 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
         /* register every directory as a stream */
         cio_chunk_open(ctx, st, ent->d_name, CIO_OPEN_RD, 0);
     }
-
     closedir(dir);
+#endif
     free(path);
 
     return 0;
@@ -88,18 +128,54 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st)
 /* Given a cio context, scan it root_path and populate stream/files */
 int cio_scan_streams(struct cio_ctx *ctx)
 {
+#ifdef _WIN32
+    WIN32_FIND_DATA fd;
+    HANDLE h;
+    TCHAR szDir[PATH_MAX + 1];
+#else
     DIR *dir;
     struct dirent *ent;
+#endif
     struct cio_stream *st;
 
+#ifdef _WIN32
+    StringCchCopy(szDir, PATH_MAX, ctx->root_path);
+    StringCchCat(szDir, PATH_MAX, TEXT("\\*"));
+    h = FindFirstFile(szDir, &fd);
+    if (INVALID_HANDLE_VALUE == h)
+    {
+        cio_errno();
+        return -1;
+    }
+#else
     dir = opendir(ctx->root_path);
     if (!dir) {
         cio_errno();
         return -1;
     }
-
+#endif
     cio_log_debug(ctx, "[cio scan] opening path %s", ctx->root_path);
 
+#ifdef _WIN32
+    do
+    {
+        if (fd.cFileName == '.' || (strcmp(fd.cFileName, "..") == 0)) {
+            continue;
+        }
+
+        /* Look just for directories */
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            continue;
+        }
+
+        /* register every directory as a stream */
+        st = cio_stream_create(ctx, fd.cFileName, CIO_STORE_FS);
+        if (st) {
+            cio_scan_stream_files(ctx, st);
+        }
+    } while (FindNextFile(h, &fd));
+    FindClose(h);
+#else
     /* Iterate the root_path */
     while ((ent = readdir(dir)) != NULL) {
         if ((ent->d_name[0] == '.') || (strcmp(ent->d_name, "..") == 0)) {
@@ -119,6 +195,7 @@ int cio_scan_streams(struct cio_ctx *ctx)
     }
 
     closedir(dir);
+#endif
     return 0;
 }
 
