@@ -26,7 +26,9 @@
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_stream.h>
-#include <chunkio/cio_file.h>
+#ifdef CIO_HAVE_BACKEND_FILESYSTEM
+#  include <chunkio/cio_file.h>
+#endif
 #include <chunkio/cio_memfs.h>
 #include <chunkio/cio_chunk.h>
 #include <chunkio/cio_log.h>
@@ -133,11 +135,13 @@ void cio_scan_dump(struct cio_ctx *ctx)
         printf(" stream:%-60s%i chunks\n",
                st->name, mk_list_size(&st->files));
 
-        if (st->type == CIO_STORE_FS) {
-            cio_file_scan_dump(ctx, st);
-        }
-        else if (st->type == CIO_STORE_MEM) {
+        if (st->type == CIO_STORE_MEM) {
             cio_memfs_scan_dump(ctx, st);
         }
+#ifdef CIO_HAVE_BACKEND_FILESYSTEM
+        else if (st->type == CIO_STORE_FS) {
+            cio_file_scan_dump(ctx, st);
+        }
+#endif
     }
 }
