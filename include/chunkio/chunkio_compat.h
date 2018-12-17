@@ -28,12 +28,26 @@
 #  include <windows.h>
 #  include <wchar.h>
 #  include <io.h>
+#  include <direct.h>
 #  include <stdint.h>
 #  include <stdlib.h>
 #  define access _access
 #  define W_OK 02 // Write permission.
 #  define mode_t uint32_t
 #  define mkdir(dir, mode) _mkdir(dir)
+
+static inline char* dirname(const char *dir) {
+    char drive[_MAX_DRIVE];
+    char splitted_dir[_MAX_DIR];
+    char filename[_MAX_FNAME];
+    char ext[_MAX_EXT];
+    char path_buffer[_MAX_PATH];
+
+    _splitpath(dir, drive, splitted_dir, filename, ext);
+    _makepath(path_buffer, drive, splitted_dir, "", "");
+
+    return path_buffer;
+}
 #else
 #  include <unistd.h>
 #endif
