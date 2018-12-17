@@ -22,12 +22,15 @@
 #include <string.h>
 
 #include <chunkio/chunkio.h>
-#include <chunkio/cio_file.h>
-#include <chunkio/cio_file_st.h>
+#ifdef CIO_HAVE_BACKEND_FILESYSTEM
+#  include <chunkio/cio_file.h>
+#  include <chunkio/cio_file_st.h>
+#endif
 #include <chunkio/cio_memfs.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_log.h>
 
+#ifdef CIO_HAVE_BACKEND_FILESYSTEM
 /*
  * Metadata is an optional information stored before the content of each file
  * and can be used for different purposes. Manipulating metadata can have
@@ -64,10 +67,12 @@ static int adjust_layout(struct cio_chunk *ch,
 
     return 0;
 }
+#endif
 
 int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
 {
     int ret;
+#ifdef CIO_HAVE_BACKEND_FILESYSTEM
     char *meta;
     char *cur_content_data;
     char *new_content_data;
@@ -76,6 +81,7 @@ int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
     size_t meta_av;
     void *tmp;
     struct cio_file *cf = ch->backend;
+#endif
     struct cio_memfs *mf;
 
     if (size > 65535) {
@@ -99,6 +105,7 @@ int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
         return 0;
     }
 
+#ifdef CIO_HAVE_BACKEND_FILESYSTEM
     /* Get metadata pointer */
     meta = cio_file_st_get_meta(cf->map);
 
@@ -173,17 +180,34 @@ int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
     adjust_layout(ch, cf, size);
 
     return 0;
+#endif // CIO_HAVE_BACKEND_FILESYSTEM
 }
 
 int cio_meta_read(struct cio_chunk *ch, char **meta_buf, int *meta_len)
 {
+#ifdef CIO_HAVE_BACKEND_FILESYSTEM
     int len;
     char *meta;
     struct cio_file *cf;
+#endif
     struct cio_memfs *mf;
 
     /* In-memory type */
-    if (ch->st->type == CIO_STORE_FS) {
+    if (ch->st->type == CIO_STORE_MEM) {
+        mf = (struct cio_memfs *) ch->backend;
+
+        /* no metadata */
+        if (!mf->meta_data) {
+            return -1;
+        }
+
+        *meta_buf = mf->meta_data;
+        *meta_len = mf->meta_len;
+
+        return 0;
+    }
+#ifdef CIO_HAVE_BACKEND_FILESYSTEM
+    else if (ch->st->type == CIO_STORE_FS) {
         cf = ch->backend;
 
         len = cio_file_st_get_meta_len(cf->map);
@@ -197,19 +221,7 @@ int cio_meta_read(struct cio_chunk *ch, char **meta_buf, int *meta_len)
 
         return 0;
     }
-    else if (ch->st->type == CIO_STORE_MEM) {
-        mf = (struct cio_memfs *) ch->backend;
-
-        /* no metadata */
-        if (!mf->meta_data) {
-            return -1;
-        }
-
-        *meta_buf = mf->meta_data;
-        *meta_len = mf->meta_len;
-
-        return 0;
-    }
+#endif
 
     return -1;
 
@@ -217,9 +229,11 @@ int cio_meta_read(struct cio_chunk *ch, char **meta_buf, int *meta_len)
 
 int cio_meta_cmp(struct cio_chunk *ch, char *meta_buf, int meta_len)
 {
+#ifdef CIO_HAVE_BACKEND_FILESYSTEM
     int len;
     char *meta;
     struct cio_file *cf = ch->backend;
+#endif
     struct cio_memfs *mf;
 
     /* In-memory type */
@@ -244,7 +258,7 @@ int cio_meta_cmp(struct cio_chunk *ch, char *meta_buf, int meta_len)
         return -1;
     }
 
-
+#ifdef CIO_HAVE_BACKEND_FILESYSTEM
     /* File system type */
     len = cio_file_st_get_meta_len(cf->map);
     if (len != meta_len) {
@@ -256,6 +270,7 @@ int cio_meta_cmp(struct cio_chunk *ch, char *meta_buf, int meta_len)
     if (memcmp(meta, meta_buf, meta_len) == 0) {
         return 0;
     }
+#endif
 
     return -1;
 }
