@@ -17,6 +17,7 @@ option(CIO_LIB_STATIC        "Enable static library build"  On)
 option(CIO_LIB_SHARED        "Enable shared library build"  Off)
 option(CIO_SANITIZE_ADDRESS  "Enable address sanitizer"     Off)
 option(CIO_TESTS             "Enable tests"                 Off)
+option(CIO_BACKEND_FILESYSTEM "Enable filesystem backend"   On)
 
 # Force Option value
 macro(CIO_OPTION option value)
@@ -29,6 +30,13 @@ if(CIO_DEV)
   CIO_OPTION(CIO_TESTS                  On)
   CIO_OPTION(CIO_LIB_STATIC             On)
 endif()
+
+# Macro to set definitions
+macro(CIO_DEFINITION var)
+  add_definitions(-D${var})
+  set(CIO_BUILD_FLAGS "${CIO_BUILD_FLAGS}#ifndef ${var}\n#define ${var}\n#endif\n")
+  set(CIO_INFO_FLAGS "${CIO_INFO_FLAGS} ${var}")
+endmacro()
 
 # Check if Address Sanitizer is enabled
 if(CIO_SANITIZE_ADDRESS OR SANITIZE_ADDRESS)
@@ -45,6 +53,10 @@ if(CIO_SANITIZE_ADDRESS OR SANITIZE_ADDRESS)
   else()
     message(STATUS "Enabling address sanitizer")
   endif()
+endif()
+
+if(CIO_BACKEND_FILESYSTEM)
+  CIO_DEFINITION(CIO_HAVE_BACKEND_FILESYSTEM)
 endif()
 
 include_directories(
