@@ -27,6 +27,13 @@
 #  include <winsock2.h>
 #  include <windows.h>
 #  include <wchar.h>
+#  include <io.h>
+#  include <stdint.h>
+#  include <stdlib.h>
+#  define access _access
+#  define W_OK 02 // Write permission.
+#  define mode_t uint32_t
+#  define mkdir(dir, mode) _mkdir(dir)
 #else
 #  include <unistd.h>
 #endif
