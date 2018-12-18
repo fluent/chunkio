@@ -2,7 +2,12 @@ cmake_minimum_required(VERSION 2.8)
 project(chunk-io)
 
 # CFLAGS
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -fPIC ")
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /Wall ")
+else()
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall ")
+endif()
 
 # Set __FILENAME__
 if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Windows")
