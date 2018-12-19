@@ -6,6 +6,7 @@ set(UNIT_TESTS_FILES
   )
 if(CIO_BACKEND_FILESYSTEM)
   set(UNIT_TESTS_FILES
+    ${UNIT_TESTS_FILES}
     fs.c
     )
 endif()
