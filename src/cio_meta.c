@@ -18,7 +18,9 @@
  */
 
 #define _GNU_SOURCE
-#include <sys/mman.h>
+#ifdef CIO_HAVE_BACKEND_FILESYSTEM
+#  include <sys/mman.h>
+#endif
 #include <string.h>
 
 #include <chunkio/chunkio.h>
