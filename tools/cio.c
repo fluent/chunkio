@@ -153,7 +153,8 @@ static void cio_signal_init()
     signal(SIGSEGV, &cio_signal_handler);
 }
 
-static int log_cb(struct cio_ctx *ctx, const char *file, int line,
+
+static int log_cb(struct cio_ctx *ctx, int level, const char *file, int line,
                   char *str)
 {
     char *dtitle = "chunkio";
