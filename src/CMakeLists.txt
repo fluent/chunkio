@@ -15,6 +15,11 @@ if(CIO_BACKEND_FILESYSTEM)
     ${src}
     cio_file.c
     )
+else()
+  set(src
+    ${src}
+    cio_file_compat.c
+    )
 endif()
 
 if(CIO_LIB_STATIC)
