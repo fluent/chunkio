@@ -47,6 +47,12 @@ struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,
         cio_log_error(ctx, "[cio chunk] invalid file name");
         return NULL;
     }
+#ifndef CIO_HAVE_BACKEND_FILESYSTEM
+    if (st->type == CIO_STORE_FS) {
+        cio_log_error(ctx, "[cio chunk] file system backend not supported");
+        return NULL;
+    }
+#endif
 
     /* allocate chunk context */
     ch = malloc(sizeof(struct cio_chunk));

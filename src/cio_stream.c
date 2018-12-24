@@ -92,6 +92,12 @@ struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name,
         cio_log_error(ctx, "[stream create] invalid stream name");
         return NULL;
     }
+#ifndef CIO_HAVE_BACKEND_FILESYSTEM
+    if (type == CIO_STORE_FS) {
+        cio_log_error(ctx, "[stream create] file system backend not supported");
+        return NULL;
+    }
+#endif
 
     /* If backend is the file system, validate the stream path */
     if (type == CIO_STORE_FS) {
