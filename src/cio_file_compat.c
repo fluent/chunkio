@@ -42,6 +42,11 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
     return -1;
 }
 
+int cio_file_write_metadata(struct cio_chunk *ch, char *buf, size_t size)
+{
+    return -1;
+}
+
 int cio_file_sync(struct cio_chunk *ch)
 {
     return -1;
