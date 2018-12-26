@@ -31,7 +31,6 @@
 
 #include "cio_tests_internal.h"
 
-#define CIO_ENV           "/tmp/cio-fs-test/"
 #define CIO_FILE_400KB    CIO_TESTS_DATA_PATH "/data/400kb.txt"
 
 /* Logging callback, once called it just turn on the log_check flag */
@@ -64,11 +63,8 @@ static void test_memfs_write()
 
     flags = CIO_CHECKSUM;
 
-    /* cleanup environment */
-    cio_utils_recursive_delete(CIO_ENV);
-
     /* Create main context */
-    ctx = cio_create(CIO_ENV, log_cb, CIO_INFO, flags);
+    ctx = cio_create(NULL, log_cb, CIO_INFO, flags);
     TEST_CHECK(ctx != NULL);
 
     /* Try to create a file with an invalid stream */
