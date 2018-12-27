@@ -17,8 +17,8 @@
  *  limitations under the License.
  */
 
-#include <sys/mman.h>
-#include <arpa/inet.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_log.h>
@@ -32,6 +32,7 @@
 #include "cio_tests_internal.h"
 
 #define CIO_FILE_400KB    CIO_TESTS_DATA_PATH "/data/400kb.txt"
+#define CIO_FILE_400KB_SIZE 409600
 
 /* Logging callback, once called it just turn on the log_check flag */
 static int log_cb(struct cio_ctx *ctx, int level, const char *file, int line,
@@ -41,6 +42,33 @@ static int log_cb(struct cio_ctx *ctx, int level, const char *file, int line,
 
     printf("[cio-test-fs] %-60s => %s:%i\n",  str, file, line);
     return 0;
+}
+
+/* Read a file into the buffer at most 'size' bytes. Return bytes read */
+static int read_file(const char *file, char *buf, size_t size)
+{
+    char *p = buf;
+    size_t total = 0;
+    size_t nb;
+
+    int fd = open(file, O_RDONLY);
+    if (fd == -1)
+        return -1;
+
+    while (1) {
+        nb = read(fd, p, size);
+        if (nb == 0)
+            break;
+        if (nb < 0) {
+            close(fd);
+            return -1;
+        }
+        p += nb;
+        size -= nb;
+        total += nb;
+    }
+    close(fd);
+    return total;
 }
 
 /* Test API generating files to the file system and then scanning them back */
@@ -87,8 +115,14 @@ static void test_memfs_write()
      * Load sample data file and with the same content through multiple write
      * operations generating other files.
      */
-    ret = cio_utils_read_file(CIO_FILE_400KB, &in_data, &in_size);
-    TEST_CHECK(ret == 0);
+    in_size = CIO_FILE_400KB_SIZE;
+    in_data = malloc(in_size);
+    if (!in_data) {
+        perror("calloc");
+        exit(EXIT_FAILURE);
+    }
+
+    ret = read_file(CIO_FILE_400KB, in_data, in_size);
     if (ret == -1) {
         cio_destroy(ctx);
         exit(EXIT_FAILURE);
@@ -127,7 +161,7 @@ static void test_memfs_write()
 
     /* Release file data and destroy context */
     free(carr);
-    munmap(in_data, in_size);
+    free(in_data);
 
     cio_scan_dump(ctx);
     cio_destroy(ctx);
