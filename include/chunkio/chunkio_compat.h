@@ -20,22 +20,25 @@
 #ifndef CHUNKIO_COMPAT_H
 #define CHUNKIO_COMPAT_H
 
-/* Windows compatibility utils */
 #ifdef _WIN32
-#  define PATH_MAX MAX_PATH
-#  define ssize_t int
-#  include <winsock2.h>
-#  pragma comment(lib, "ws2_32.lib")
-#  include <windows.h>
-#  include <wchar.h>
-#  include <io.h>
-#  include <direct.h>
-#  include <stdint.h>
-#  include <stdlib.h>
-#  define access _access
-#  define W_OK 02 // Write permission.
-#  define mode_t uint32_t
-#  define mkdir(dir, mode) _mkdir(dir)
+#include <winsock2.h>
+#include <windows.h>
+#include <io.h>
+#include <direct.h>
+#pragma comment(lib, "ws2_32.lib")
+
+/** mode flags for access() */
+#define R_OK 04
+#define W_OK 02
+#define X_OK 01
+#define F_OK 00
+
+#define PATH_MAX MAX_PATH
+#define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
+#define strerror_r(errno,buf,len) strerror_s(buf,len,errno)
+
+typedef SSIZE_T ssize_t;
+typedef unsigned mode_t;
 
 static inline char* dirname(const char *path)
 {
@@ -52,10 +55,7 @@ static inline char* dirname(const char *path)
 
     return buf;
 }
-#  if !defined(S_ISREG) && defined(S_IFMT) && defined(S_IFREG)
-#    define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
-#  endif
-#  define strerror_r(errno,buf,len) strerror_s(buf,len,errno)
+
 inline int getpagesize(void)
 {
     SYSTEM_INFO system_info;
@@ -63,7 +63,7 @@ inline int getpagesize(void)
     return system_info.dwPageSize;
 }
 #else
-#  include <unistd.h>
+#include <unistd.h>
 #endif
 
 #endif
