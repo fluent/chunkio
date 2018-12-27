@@ -5,7 +5,6 @@ set(src
   cio_chunk.c
   cio_meta.c
   cio_scan.c
-  cio_utils.c
   cio_stream.c
   chunkio.c
   )
@@ -14,6 +13,7 @@ if(CIO_BACKEND_FILESYSTEM)
   set(src
     ${src}
     cio_file.c
+    cio_utils.c
     )
 endif()
 
