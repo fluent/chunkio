@@ -21,6 +21,7 @@
 #define CIO_CHUNK_H
 
 #include <chunkio/chunkio_compat.h>
+#include <sys/types.h>
 #include <inttypes.h>
 
 struct cio_chunk {
