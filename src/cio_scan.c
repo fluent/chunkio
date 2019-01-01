@@ -21,9 +21,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
-#include <dirent.h>
-#include <arpa/inet.h>
 
+#include <chunkio/chunkio_compat.h>
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_file.h>
