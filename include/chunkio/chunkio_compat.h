@@ -64,6 +64,9 @@ inline int getpagesize(void)
 }
 #else
 #include <unistd.h>
+#include <libgen.h>
+#include <dirent.h>
+#include <arpa/inet.h>
 #endif
 
 #endif

@@ -27,7 +27,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
-#include <arpa/inet.h>
 #include <limits.h>
 
 #include <chunkio/chunkio_compat.h>
