@@ -24,13 +24,13 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <chunkio/chunkio_compat.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <arpa/inet.h>
 #include <limits.h>
 
+#include <chunkio/chunkio_compat.h>
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_crc32.h>
 #include <chunkio/cio_chunk.h>

@@ -21,13 +21,14 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <chunkio/chunkio_compat.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #ifndef _WIN32
 #  include <libgen.h>
 #endif
+
+#include <chunkio/chunkio_compat.h>
 
 /* Check if a path is a directory */
 int cio_os_isdir(const char *dir)
