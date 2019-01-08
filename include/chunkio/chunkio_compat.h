@@ -20,39 +20,42 @@
 #ifndef CHUNKIO_COMPAT_H
 #define CHUNKIO_COMPAT_H
 
-/* Windows compatibility utils */
 #ifdef _WIN32
-#  define PATH_MAX MAX_PATH
-#  define ssize_t int
-#  include <winsock2.h>
-#  pragma comment(lib, "ws2_32.lib")
-#  include <windows.h>
-#  include <wchar.h>
-#  include <io.h>
-#  include <direct.h>
-#  include <stdint.h>
-#  include <stdlib.h>
-#  define access _access
-#  define W_OK 02 // Write permission.
-#  define mode_t uint32_t
-#  define mkdir(dir, mode) _mkdir(dir)
+#include <winsock2.h>
+#include <windows.h>
+#include <io.h>
+#include <direct.h>
+#pragma comment(lib, "ws2_32.lib")
 
-static inline char* dirname(const char *dir) {
+/** mode flags for access() */
+#define R_OK 04
+#define W_OK 02
+#define X_OK 01
+#define F_OK 00
+
+#define PATH_MAX MAX_PATH
+#define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
+#define strerror_r(errno,buf,len) strerror_s(buf,len,errno)
+
+typedef SSIZE_T ssize_t;
+typedef unsigned mode_t;
+
+static inline char* dirname(const char *path)
+{
     char drive[_MAX_DRIVE];
-    char splitted_dir[_MAX_DIR];
-    char filename[_MAX_FNAME];
+    char dir[_MAX_DIR];
+    char fname[_MAX_FNAME];
     char ext[_MAX_EXT];
-    char path_buffer[_MAX_PATH];
+    static char buf[_MAX_PATH];
 
-    _splitpath(dir, drive, splitted_dir, filename, ext);
-    _makepath(path_buffer, drive, splitted_dir, "", "");
+    _splitpath_s(path, drive, _MAX_DRIVE, dir, _MAX_DIR,
+                       fname, _MAX_FNAME, ext, _MAX_EXT);
 
-    return path_buffer;
+    _makepath_s(buf, _MAX_PATH, drive, dir, "", "");
+
+    return buf;
 }
-#  if !defined(S_ISREG) && defined(S_IFMT) && defined(S_IFREG)
-#    define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
-#  endif
-#  define strerror_r(errno,buf,len) strerror_s(buf,len,errno)
+
 inline int getpagesize(void)
 {
     SYSTEM_INFO system_info;
@@ -60,7 +63,7 @@ inline int getpagesize(void)
     return system_info.dwPageSize;
 }
 #else
-#  include <unistd.h>
+#include <unistd.h>
 #endif
 
 #endif

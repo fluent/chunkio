@@ -4,7 +4,7 @@ project(chunk-io)
 # CFLAGS
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /Wall ")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W4 ")
 else()
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall ")
 endif()

@@ -19,7 +19,6 @@
 
 #ifndef CIO_OS_H
 #define CIO_OS_H
-#include <chunkio/chunkio_compat.h>
 
 int cio_os_isdir(const char *dir);
 int cio_os_mkpath(const char *dir, mode_t mode);

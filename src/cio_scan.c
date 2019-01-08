@@ -26,9 +26,7 @@
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_stream.h>
-#ifdef CIO_HAVE_BACKEND_FILESYSTEM
-#  include <chunkio/cio_file.h>
-#endif
+#include <chunkio/cio_file.h>
 #include <chunkio/cio_memfs.h>
 #include <chunkio/cio_chunk.h>
 #include <chunkio/cio_log.h>
@@ -138,10 +136,8 @@ void cio_scan_dump(struct cio_ctx *ctx)
         if (st->type == CIO_STORE_MEM) {
             cio_memfs_scan_dump(ctx, st);
         }
-#ifdef CIO_HAVE_BACKEND_FILESYSTEM
         else if (st->type == CIO_STORE_FS) {
             cio_file_scan_dump(ctx, st);
         }
-#endif
     }
 }
