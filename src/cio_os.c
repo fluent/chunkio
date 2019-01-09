@@ -24,9 +24,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#ifndef _WIN32
-#  include <libgen.h>
-#endif
 
 #include <chunkio/chunkio_compat.h>
 

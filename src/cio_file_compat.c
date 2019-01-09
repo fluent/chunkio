@@ -17,6 +17,7 @@
  *  limitations under the License.
  */
 
+#include <chunkio/chunkio_compat.h>
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_chunk.h>
 #include <chunkio/cio_file_st.h>
@@ -37,6 +38,11 @@ void cio_file_close(struct cio_chunk *ch, int delete)
 }
 
 int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
+{
+    return -1;
+}
+
+int cio_file_write_metadata(struct cio_chunk *ch, char *buf, size_t size)
 {
     return -1;
 }
