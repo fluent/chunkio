@@ -21,6 +21,7 @@
 #include <sys/mman.h>
 #include <string.h>
 
+#include <chunkio/chunkio_compat.h>
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_file.h>
 #include <chunkio/cio_file_st.h>
