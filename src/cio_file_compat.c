@@ -17,6 +17,7 @@
  *  limitations under the License.
  */
 
+#include <chunkio/chunkio_compat.h>
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_chunk.h>
 #include <chunkio/cio_file_st.h>
