@@ -99,6 +99,7 @@ int cio_utils_read_file(const char *path, char **buf, size_t *size)
     int fd;
     int ret;
     char *data;
+    FILE *fp;
     struct stat st;
 
     fd = open(path, O_RDONLY);
@@ -118,14 +119,27 @@ int cio_utils_read_file(const char *path, char **buf, size_t *size)
         return -1;
     }
 
-    data = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (data == MAP_FAILED) {
-        perror("mmap");
+    fp = fdopen(fd, "r");
+    if (fp == NULL) {
+        perror("fdopen");
         close(fd);
         return -1;
     }
 
-    close(fd);
+    data = calloc(st.st_size, 1);
+    if (!data) {
+        perror("calloc");
+        fclose(fp);
+        return -1;
+    }
+
+    ret = fread(data, st.st_size, 1, fp);
+    if (ret != 1) {
+        free(data);
+        fclose(fp);
+        return -1;
+    }
+    fclose(fp);
 
     *buf = data;
     *size = st.st_size;

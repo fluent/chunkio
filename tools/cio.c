@@ -428,7 +428,7 @@ static void cb_cmd_perf(struct cio_ctx *ctx, int opt_buffer, char *pfile,
 
     /* Release file data and destroy context */
     free(carr);
-    munmap(in_data, in_size);
+    free(in_data);
 }
 
 int main(int argc, char **argv)
