@@ -33,6 +33,7 @@
 #include <chunkio/chunkio_compat.h>
 #include <chunkio/cio_log.h>
 
+#ifndef _MSC_VER
 /*
  * Taken from StackOverflow:
  *
@@ -93,6 +94,12 @@ int cio_utils_recursive_delete(const char *dir)
 
     return ret;
 }
+#else
+int cio_utils_recursive_delete(const char *dir)
+{
+    return -1;
+}
+#endif
 
 int cio_utils_read_file(const char *path, char **buf, size_t *size)
 {
