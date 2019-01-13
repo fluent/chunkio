@@ -492,9 +492,7 @@ int main(int argc, char **argv)
             root_path = strdup(optarg);
             break;
         case 'p':
-            cio_utils_recursive_delete(CIO_PERF_PATH);
             perf_file = strdup(optarg);
-            root_path = strdup(CIO_PERF_PATH);
             cmd_perf = CIO_TRUE;
             break;
         case 'w':
@@ -529,8 +527,13 @@ int main(int argc, char **argv)
         }
     }
 
+    if (opt_buffer == CIO_STORE_FS && cmd_perf) {
+        root_path = strdup(CIO_PERF_PATH);
+        cio_utils_recursive_delete(CIO_PERF_PATH);
+    }
+
     /* Check root path, if not set, defaults to ~/.cio */
-    if (!root_path) {
+    if (opt_buffer == CIO_STORE_FS && !root_path) {
         ret = cio_default_root_path(tmp, sizeof(tmp) - 1);
         if (ret == -1) {
             fprintf(stderr,
@@ -546,7 +549,8 @@ int main(int argc, char **argv)
 
     /* Create CIO instance */
     ctx = cio_create(root_path, log_cb, verbose, flags);
-    free(root_path);
+    if (root_path)
+        free(root_path);
 
     if (!ctx) {
         exit(EXIT_FAILURE);
