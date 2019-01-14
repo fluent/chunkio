@@ -24,11 +24,10 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fts.h>
-#include <sys/mman.h>
 #include <errno.h>
+#ifndef _MSC_VER
+#include <fts.h>
+#endif
 
 #include <chunkio/chunkio_compat.h>
 #include <chunkio/cio_log.h>
