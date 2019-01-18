@@ -64,6 +64,12 @@
 #define ANSI_BOLD_GREEN    ANSI_BOLD ANSI_GREEN
 #define ANSI_BOLD_WHITE    ANSI_BOLD ANSI_WHITE
 
+#ifdef _MSC_VER
+#define STDIN_FILENO _fileno( stdin )
+#define STDOUT_FILENO _fileno( stdout )
+#define STDERR_FILENO _fileno( stderr )
+#endif
+
 #define CIO_ROOT_PATH  ".cio"
 #define cio_print_signal(X) case X:                       \
     write (STDERR_FILENO, #X ")\n" , sizeof(#X ")\n")-1); \
