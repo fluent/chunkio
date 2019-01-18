@@ -21,12 +21,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
-#include <sys/mman.h>
-#include <sys/time.h>
-#include <pwd.h>
 #include <limits.h>
 #include <signal.h>
 #include <time.h>
+#ifndef _MSC_VER
+#include <pwd.h>
+#endif
 #ifdef __MACH__
 #  include <mach/clock.h>
 #  include <mach/mach.h>
@@ -193,6 +193,7 @@ static int log_cb(struct cio_ctx *ctx, int level, const char *file, int line,
     return 0;
 }
 
+#ifndef _MSC_VER
 static int cio_default_root_path(char *path, int size)
 {
     int len;
@@ -214,6 +215,12 @@ static int cio_default_root_path(char *path, int size)
 
     return 0;
 }
+#else
+static int cio_default_root_path(char *path, int size)
+{
+    return -1;
+}
+#endif
 
 static void cio_timespec_get(struct timespec *t)
 {
