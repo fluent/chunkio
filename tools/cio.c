@@ -120,8 +120,10 @@ static void cio_signal_handler(int signal)
     write(STDERR_FILENO, s, sizeof(s) - 1);
     switch (signal) {
         cio_print_signal(SIGINT);
+#ifndef _MSC_VER
         cio_print_signal(SIGQUIT);
         cio_print_signal(SIGHUP);
+#endif
         cio_print_signal(SIGTERM);
         cio_print_signal(SIGSEGV);
     };
@@ -129,8 +131,10 @@ static void cio_signal_handler(int signal)
     /* Signal handlers */
     switch (signal) {
     case SIGINT:
+#ifndef _MSC_VER
     case SIGQUIT:
     case SIGHUP:
+#endif
     case SIGTERM:
         _exit(EXIT_SUCCESS);
     case SIGSEGV:
@@ -168,8 +172,10 @@ void cio_bytes_to_human_readable_size(size_t bytes,
 static void cio_signal_init()
 {
     signal(SIGINT,  &cio_signal_handler);
+#ifndef _MSC_VER
     signal(SIGQUIT, &cio_signal_handler);
     signal(SIGHUP,  &cio_signal_handler);
+#endif
     signal(SIGTERM, &cio_signal_handler);
     signal(SIGSEGV, &cio_signal_handler);
 }
