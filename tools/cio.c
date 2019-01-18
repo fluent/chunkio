@@ -444,7 +444,7 @@ static void cb_cmd_perf(struct cio_ctx *ctx, int opt_buffer, char *pfile,
 
 int main(int argc, char **argv)
 {
-    int ret;
+    int ret = 0;
     int opt;
     int opt_silent = CIO_FALSE;
     int opt_pwrites = 5;
