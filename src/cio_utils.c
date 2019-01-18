@@ -102,33 +102,25 @@ int cio_utils_recursive_delete(const char *dir)
 
 int cio_utils_read_file(const char *path, char **buf, size_t *size)
 {
-    int fd;
     int ret;
     char *data;
     FILE *fp;
     struct stat st;
 
-    fd = open(path, O_RDONLY);
-    if (fd == -1) {
-        perror("open");
+    fp = fopen(path, "rb");
+    if (fp == NULL) {
+        perror("fopen");
         return -1;
     }
 
-    ret = fstat(fd, &st);
+    ret = fstat(fileno(fp), &st);
     if (ret == -1) {
+        fclose(fp);
         perror("fstat");
-        close(fd);
         return -1;
     }
     if (!S_ISREG(st.st_mode)) {
-        close(fd);
-        return -1;
-    }
-
-    fp = fdopen(fd, "r");
-    if (fp == NULL) {
-        perror("fdopen");
-        close(fd);
+        fclose(fp);
         return -1;
     }
 
