@@ -19,8 +19,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <chunkio/chunkio_compat.h>
-#include <getopt.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/mman.h>
@@ -33,6 +31,9 @@
 #  include <mach/clock.h>
 #  include <mach/mach.h>
 #endif
+
+#include <monkey/mk_core/mk_getopt.h>
+#include <chunkio/chunkio_compat.h>
 
 #ifndef _MSC_VER
 #define ANSI_RESET    "\033[0m"
