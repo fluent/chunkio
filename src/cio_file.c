@@ -621,6 +621,8 @@ int cio_file_sync(struct cio_chunk *ch)
 {
     int ret;
     int sync_mode;
+    void *tmp;
+    size_t old_size;
     size_t av_size;
     size_t size;
     struct stat fst;
@@ -639,6 +641,9 @@ int cio_file_sync(struct cio_chunk *ch)
         cio_errno();
         return -1;
     }
+
+    /* Save current mmap size */
+    old_size = cf->alloc_size;
 
     /* If there are extra space, truncate the file size */
     av_size = get_available_size(cf);
@@ -661,6 +666,20 @@ int cio_file_sync(struct cio_chunk *ch)
                           "[cio file sync] error adjusting size at: "
                           " %s/%s", ch->st->name, ch->name);
         }
+    }
+
+    /* If the mmap size changed, adjust mapping to the proper size */
+    if (old_size != cf->alloc_size) {
+        tmp = mremap(cf->map, old_size, cf->alloc_size, MREMAP_MAYMOVE);
+        if (tmp == MAP_FAILED) {
+            cio_errno();
+            cio_log_error(ch->ctx,
+                          "[cio file] cannot remap memory: old=%lu new=%lu",
+                          old_size, cf->alloc_size);
+            cf->alloc_size = old_size;
+            return -1;
+        }
+        cf->map = tmp;
     }
 
     /* Finalize CRC32 checksum */
