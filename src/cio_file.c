@@ -492,8 +492,10 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
         }
         /* OSX mman does not implement mremap or MREMAP_MAYMOVE. */
 #ifndef MREMAP_MAYMOVE
-        if (munmap(cf->data_size, av_size) == -1)
+        if (munmap(cf->map, cf->alloc_size) == -1) {
+            cio_errno();
             return -1;
+        }
         tmp = mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, cf->fd, 0);
 #else
         tmp = mremap(cf->map, cf->alloc_size,
@@ -670,7 +672,16 @@ int cio_file_sync(struct cio_chunk *ch)
 
     /* If the mmap size changed, adjust mapping to the proper size */
     if (old_size != cf->alloc_size) {
+#ifndef MREMAP_MAYMOVE /* OSX */
+        if (munmap(cf->map, old_size) == -1) {
+            cio_errno();
+            return -1;
+        }
+        tmp = mmap(0, cf->alloc_size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                   cf->fd, 0);
+#else
         tmp = mremap(cf->map, old_size, cf->alloc_size, MREMAP_MAYMOVE);
+#endif
         if (tmp == MAP_FAILED) {
             cio_errno();
             cio_log_error(ch->ctx,
