@@ -326,7 +326,6 @@ static int munmap_file(struct cio_ctx *ctx, struct cio_chunk *ch)
 
     /* Sync pending changes to disk */
     if (cf->synced == CIO_FALSE) {
-        printf("[MUNMAP] syncing data to disk on unmaping\n");
         ret = cio_file_sync(ch);
         if (ret == -1) {
             cio_log_error(ch->ctx,
