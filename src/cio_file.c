@@ -463,18 +463,13 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     }
     ch->backend = cf;
 
-    /*
-     * Map the file 'only' if it was not opened in read-only mode. There some
-     * cases where the caller can have multiple files to be processed and don't
-     * want to mmap them until is required.
-     */
-    if ((flags & CIO_OPEN_RD) == 0) {
-        ret = mmap_file(ctx, ch, size);
-        if (ret == -1) {
-            cio_log_error(ctx, "cannot mmap file %s", path);
-            return NULL;
-        }
+    /* Map the file */
+    ret = mmap_file(ctx, ch, size);
+    if (ret == -1) {
+        cio_log_error(ctx, "cannot mmap file %s", path);
+        return NULL;
     }
+
     return cf;
 }
 
