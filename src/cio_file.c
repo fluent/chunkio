@@ -319,6 +319,10 @@ static int munmap_file(struct cio_ctx *ctx, struct cio_chunk *ch)
 
     cf = (struct cio_file *) ch->backend;
 
+    if (!cf) {
+        return -1;
+    }
+
     /* File not mapped */
     if (cf->map == NULL) {
         return -1;
@@ -552,6 +556,10 @@ void cio_file_close(struct cio_chunk *ch, int delete)
 {
     int ret;
     struct cio_file *cf = (struct cio_file *) ch->backend;
+
+    if (!cf) {
+        return;
+    }
 
     /* Safe unmap of the file content */
     munmap_file(ch->ctx, ch);
