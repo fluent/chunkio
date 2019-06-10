@@ -67,6 +67,7 @@ struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,
     ch->tx_active = CIO_FALSE;
     ch->tx_crc = 0;
     ch->tx_content_length = 0;
+    ch->backend = NULL;
 
     mk_list_add(&ch->_head, &st->files);
 
@@ -80,6 +81,7 @@ struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,
 
     if (!backend) {
         cio_log_error(ctx, "[cio chunk] error initializing backend file");
+        mk_list_del(&ch->_head);
         free(ch->name);
         free(ch);
         return NULL;
