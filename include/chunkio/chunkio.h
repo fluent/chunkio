@@ -30,6 +30,7 @@
 #define CIO_WARN   2
 #define CIO_INFO   3
 #define CIO_DEBUG  4
+#define CIO_TRACE  5
 
 /* Storage backend */
 #define CIO_STORE_FS        0
