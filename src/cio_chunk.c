@@ -357,7 +357,7 @@ int cio_chunk_tx_rollback(struct cio_chunk *ch)
     struct cio_memfs *mf;
     struct cio_file *cf;
 
-    if (ch->tx_active == CIO_TRUE) {
+    if (ch->tx_active == CIO_FALSE) {
         return -1;
     }
 
