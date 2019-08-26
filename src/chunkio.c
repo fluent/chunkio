@@ -119,6 +119,10 @@ int cio_load(struct cio_ctx *ctx)
 
 void cio_destroy(struct cio_ctx *ctx)
 {
+    if (!ctx) {
+        return;
+    }
+
     cio_stream_destroy_all(ctx);
     free(ctx->root_path);
     free(ctx);
