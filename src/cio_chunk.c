@@ -95,6 +95,10 @@ void cio_chunk_close(struct cio_chunk *ch, int delete)
 {
     int type;
 
+    if (!ch) {
+        return;
+    }
+
     type = ch->st->type;
     if (type == CIO_STORE_MEM) {
         cio_memfs_close(ch);
