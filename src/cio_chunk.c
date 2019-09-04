@@ -112,6 +112,18 @@ void cio_chunk_close(struct cio_chunk *ch, int delete)
     free(ch);
 }
 
+int cio_chunk_unlink(struct cio_chunk *ch)
+{
+    int type;
+
+    type = ch->st->type;
+    if (type == CIO_STORE_FS) {
+        return cio_file_unlink(ch);
+    }
+
+    return 0;
+}
+
 /*
  * Write at a specific offset of the content area. Offset must be >= 0 and
  * less than current data length.

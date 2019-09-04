@@ -41,6 +41,7 @@ struct cio_chunk {
 struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,
                                  const char *name, int flags, size_t size);
 void cio_chunk_close(struct cio_chunk *ch, int delete);
+int cio_chunk_unlink(struct cio_chunk *ch);
 int cio_chunk_write(struct cio_chunk *ch, const void *buf, size_t count);
 int cio_chunk_write_at(struct cio_chunk *ch, off_t offset,
                        const void *buf, size_t count);

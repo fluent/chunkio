@@ -46,6 +46,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
                                int flags,
                                size_t size);
 void cio_file_close(struct cio_chunk *ch, int delete);
+int cio_file_unlink(struct cio_chunk *ch);
 int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count);
 int cio_file_write_metadata(struct cio_chunk *ch, char *buf, size_t size);
 int cio_file_sync(struct cio_chunk *ch);

@@ -642,7 +642,6 @@ int cio_file_down(struct cio_chunk *ch)
 
 void cio_file_close(struct cio_chunk *ch, int delete)
 {
-    int ret;
     struct cio_file *cf = (struct cio_file *) ch->backend;
 
     if (!cf) {
@@ -654,13 +653,7 @@ void cio_file_close(struct cio_chunk *ch, int delete)
 
     /* Should we delete the content from the file system ? */
     if (delete == CIO_TRUE) {
-        ret = unlink(cf->path);
-        if (ret == -1) {
-            cio_errno();
-            cio_log_error(ch->ctx,
-                          "[cio file] error deleting file at close %s:%s",
-                          ch->st->name, ch->name);
-        }
+        cio_file_unlink(ch);          /* ignore return value */
     }
 
     /* Close file descriptor */
@@ -670,6 +663,21 @@ void cio_file_close(struct cio_chunk *ch, int delete)
 
     free(cf->path);
     free(cf);
+}
+
+int cio_file_unlink(struct cio_chunk *ch)
+{
+    int ret;
+    struct cio_file *cf = (struct cio_file *) ch->backend;
+
+    ret = unlink(cf->path);
+    if (ret == -1) {
+        cio_errno();
+        cio_log_error(ch->ctx,
+                      "[cio file] error deleting file at close %s:%s",
+                      ch->st->name, ch->name);
+    }
+    return ret;
 }
 
 int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
