@@ -45,7 +45,7 @@ int cio_errno_print(int errnum, const char *file, int line);
                   __LINE__, fmt, ##__VA_ARGS__)
 
 #define cio_log_trace(ctx, fmt, ...)                \
-    cio_log_print(ctx, CIO_trace, __FILENAME__,     \
+    cio_log_print(ctx, CIO_TRACE, __FILENAME__,     \
                   __LINE__, fmt, ##__VA_ARGS__)
 
 #ifdef __FILENAME__
