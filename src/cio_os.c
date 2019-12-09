@@ -60,6 +60,12 @@ int cio_os_mkpath(const char *dir, mode_t mode)
         return 0;
     }
 
+#ifdef _WIN32
+    if (SHCreateDirectoryExA(NULL, dir, NULL) != ERROR_SUCCESS) {
+        return 1;
+    }
+    return 0;
+#else
     dup_dir = strdup(dir);
     if (!dup_dir) {
         return 1;
@@ -67,4 +73,5 @@ int cio_os_mkpath(const char *dir, mode_t mode)
     cio_os_mkpath(dirname(dup_dir), mode);
     free(dup_dir);
     return mkdir(dir, mode);
+#endif
 }

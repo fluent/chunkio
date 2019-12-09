@@ -25,6 +25,7 @@
 #include <windows.h>
 #include <io.h>
 #include <direct.h>
+#include <shlobj_core.h>
 #pragma comment(lib, "ws2_32.lib")
 
 /** mode flags for access() */
