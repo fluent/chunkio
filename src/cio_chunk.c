@@ -189,15 +189,15 @@ int cio_chunk_get_content(struct cio_chunk *ch, char **buf, size_t *size)
     else if (type == CIO_STORE_FS) {
         cf = ch->backend;
         ret = cio_file_read_prepare(ch->ctx, ch);
-        if (ret == -1) {
-            return -1;
+        if (ret != CIO_OK) {
+            return ret;
         }
         *size = cf->data_size;
         *buf = cio_file_st_get_content(cf->map);
         return ret;
     }
 
-    return -1;
+    return CIO_ERROR;
 }
 
 size_t cio_chunk_get_content_end_pos(struct cio_chunk *ch)
