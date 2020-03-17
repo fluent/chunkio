@@ -124,9 +124,18 @@ static int adjust_layout(struct cio_chunk *ch,
     return 0;
 }
 
-static void write_init_header(struct cio_file *cf)
+/* Initialize Chunk header & structure */
+static void write_init_header(struct cio_chunk *ch, struct cio_file *cf)
 {
     memcpy(cf->map, cio_file_init_bytes, sizeof(cio_file_init_bytes));
+
+    /* If no checksum is enabled, reset the initial crc32 bytes */
+    if (!(ch->ctx->flags & CIO_CHECKSUM)) {
+        cf->map[2] = 0;
+        cf->map[3] = 0;
+        cf->map[4] = 0;
+        cf->map[5] = 0;
+    }
 }
 
 /* Return the available size in the file map to write data */
@@ -174,7 +183,7 @@ static int cio_file_format_check(struct cio_chunk *ch,
         }
 
         /* Initialize init bytes */
-        write_init_header(cf);
+        write_init_header(ch, cf);
 
         /* Write checksum in context (note: crc32 not finalized) */
         cio_file_calculate_checksum(cf, &cf->crc_cur);
