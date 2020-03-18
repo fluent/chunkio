@@ -284,15 +284,25 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
         return CIO_OK;
     }
 
-    /* Check if some previous content exists */
-    ret = fstat(cf->fd, &fst);
-    if (ret == -1) {
-        cio_errno();
-        return CIO_ERROR;
-    }
+    /*
+     * 'size' value represents the value of a previous fstat(2) set by a previous
+     * caller. If the value is greater than zero, just use it, otherwise do a new
+     * fstat(2) of the file descriptor.
+     */
 
-    /* Get file size from the file system */
-    fs_size = fst.st_size;
+    if (size > 0) {
+        fs_size = size;
+    }
+    else {
+        ret = fstat(cf->fd, &fst);
+        if (ret == -1) {
+            cio_errno();
+            return CIO_ERROR;
+        }
+
+        /* Get file size from the file system */
+        fs_size = fst.st_size;
+    }
 
     /* Mmap */
     if (cf->flags & CIO_OPEN) {
@@ -520,7 +530,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     }
 
     /* Map the file */
-    ret = mmap_file(ctx, ch, size);
+    ret = mmap_file(ctx, ch, cf->fs_size);
     if (ret == CIO_ERROR || ret == CIO_CORRUPTED || ret == CIO_RETRY) {
         cio_file_close(ch, CIO_FALSE);
         *err = ret;
