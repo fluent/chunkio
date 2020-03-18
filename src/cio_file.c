@@ -186,7 +186,9 @@ static int cio_file_format_check(struct cio_chunk *ch,
         write_init_header(ch, cf);
 
         /* Write checksum in context (note: crc32 not finalized) */
-        cio_file_calculate_checksum(cf, &cf->crc_cur);
+        if (ch->ctx->flags & CIO_CHECKSUM) {
+            cio_file_calculate_checksum(cf, &cf->crc_cur);
+        }
     }
     else {
         /* Check first two bytes */
@@ -196,17 +198,18 @@ static int cio_file_format_check(struct cio_chunk *ch,
             return -1;
         }
 
-        /* Initialize CRC variable */
-        cf->crc_cur = cio_crc32_init();
-
-        /* Get checksum stored in the mmap */
-        p = (unsigned char *) cio_file_st_get_hash(cf->map);
-
-        /* Calculate data checksum in variable */
-        cio_file_calculate_checksum(cf, &crc);
-
-        /* Compare checksum */
+        /* Checksum */
         if (ch->ctx->flags & CIO_CHECKSUM) {
+            /* Initialize CRC variable */
+            cf->crc_cur = cio_crc32_init();
+
+            /* Get checksum stored in the mmap */
+            p = (unsigned char *) cio_file_st_get_hash(cf->map);
+
+            /* Calculate content checksum */
+            cio_file_calculate_checksum(cf, &crc);
+
+            /* Compare */
             crc_check = cio_crc32_finalize(crc);
             crc_check = htonl(crc_check);
             if (memcmp(p, &crc_check, sizeof(crc_check)) != 0) {
