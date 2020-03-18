@@ -17,9 +17,25 @@
 #include "crc32.h"     /* include the header file generated with pycrc */
 #include <stdlib.h>
 #include <stdint.h>
-#include <endian.h>
 
-
+/* Patch by Fluent Bit Authors */
+#ifdef __APPLE__
+#  include <machine/endian.h>
+#  include <libkern/OSByteOrder.h>
+#  define htobe16(x) OSSwapHostToBigInt16(x)
+#  define htole16(x) OSSwapHostToLittleInt16(x)
+#  define be16toh(x) OSSwapBigToHostInt16(x)
+#  define le16toh(x) OSSwapLittleToHostInt16(x)
+#elif defined(_WIN32)
+#  define htobe16(x) htons(x)
+#  define htole16(x) (x)
+#  define be16toh(x) ntohs(x)
+#  define le16toh(x) (x)
+#elif defined(__FreeBSD__)
+#  include <sys/endian.h>
+#else
+#  include <endian.h>
+#endif
 
 /**
  * Static table used for the table_driven implementation.
