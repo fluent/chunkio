@@ -45,7 +45,7 @@ char cio_file_init_bytes[] =   {
     /* crc32 (4 bytes) in network byte order */
     0xff, 0x12, 0xd9, 0x41,
 
-    /* padding bytes (we have 16 extra bytes */
+    /* padding bytes (we have 16 extra bytes) */
     0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00,
@@ -199,7 +199,7 @@ static int cio_file_format_check(struct cio_chunk *ch,
         /* Initialize CRC variable */
         cf->crc_cur = cio_crc32_init();
 
-        /* Get hash stored in the mmap */
+        /* Get checksum stored in the mmap */
         p = (unsigned char *) cio_file_st_get_hash(cf->map);
 
         /* Calculate data checksum in variable */
@@ -210,8 +210,8 @@ static int cio_file_format_check(struct cio_chunk *ch,
             crc_check = cio_crc32_finalize(crc);
             crc_check = htonl(crc_check);
             if (memcmp(p, &crc_check, sizeof(crc_check)) != 0) {
-                cio_log_debug(ch->ctx, "[cio file] invalid crc32 at %s",
-                              ch->name);
+                cio_log_debug(ch->ctx, "[cio file] invalid crc32 at %s/%s",
+                              ch->name, cf->path);
                 return -1;
             }
             cf->crc_cur = crc;
@@ -687,8 +687,12 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
         return 0;
     }
 
+    if (!ch) {
+        return -1;
+    }
+
     if (cio_chunk_is_up(ch) == CIO_FALSE) {
-        cio_log_error("[cio file] file is not mmaped: %s:%s",
+        cio_log_error("[cio file] file is not mmap()ed: %s:%s",
                       ch->st->name, ch->name);
         return -1;
     }
@@ -698,7 +702,6 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
 
     /* validate there is enough space, otherwise resize */
     if (av_size < count) {
-
         /* Set the pre-content size (chunk header + metadata) */
         pre_content = (CIO_FILE_HEADER_MIN + meta_len);
 
@@ -902,6 +905,7 @@ int cio_file_sync(struct cio_chunk *ch)
         }
     }
 
+
     /* If the mmap size changed, adjust mapping to the proper size */
     if (old_size != cf->alloc_size) {
 #ifndef MREMAP_MAYMOVE /* OSX */
@@ -951,17 +955,18 @@ int cio_file_sync(struct cio_chunk *ch)
     return 0;
 }
 
-/* Change the size of file in the file system (not memory map) */
+/*
+ * Change the size of 'file' in the file system (not memory map). This function
+ * MUST honor the required new size.
+ */
 int cio_file_fs_size_change(struct cio_file *cf, size_t new_size)
 {
     int ret;
 
-    if (new_size == cf->alloc_size) {
-        return 0;
-    }
-
-    /* macOS does not have fallocate().
-     * So, we should use ftruncate always. */
+    /*
+     * fallocate() is not portable an Linux only. Since macOS does not have
+     * fallocate() we use ftruncate().
+     */
 #if defined(CIO_HAVE_FALLOCATE)
     if (new_size > cf->alloc_size) {
         /*
