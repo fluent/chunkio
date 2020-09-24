@@ -212,7 +212,6 @@ int cio_chunk_get_content(struct cio_chunk *ch, char **buf, size_t *size)
 int cio_chunk_get_content_copy(struct cio_chunk *ch,
                                void **out_buf, size_t *out_size)
 {
-    int ret = 0;
     int type;
 
     type = ch->st->type;
