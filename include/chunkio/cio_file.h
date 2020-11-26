@@ -34,7 +34,11 @@ struct cio_file {
     size_t realloc_size;      /* chunk size to increase alloc */
     char *path;               /* root path + stream   */
     char *map;                /* map of data          */
-
+#ifdef _WIN32
+    void *h;
+    crc_t crc_be;
+    int map_synced;
+#endif
     /* cached addr */
     char *st_content;
     crc_t crc_cur;
