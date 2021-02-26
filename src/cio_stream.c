@@ -263,7 +263,7 @@ size_t cio_stream_size_chunks_up(struct cio_stream *st)
     struct mk_list *head;
 
     mk_list_foreach(head, &st->chunks_up) {
-        ch = mk_list_entry(head, struct cio_chunk, _head);
+        ch = mk_list_entry(head, struct cio_chunk, _state_head);
 
         bytes = cio_chunk_get_content_size(ch);
         if (bytes <= 0) {
