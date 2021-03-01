@@ -320,7 +320,12 @@ int cio_chunk_lock(struct cio_chunk *ch)
     }
 
     ch->lock = CIO_TRUE;
-    return cio_chunk_sync(ch);
+
+    if (cio_chunk_is_up(ch) == CIO_TRUE) {
+        return cio_chunk_sync(ch);
+    }
+
+    return CIO_OK;
 }
 
 int cio_chunk_unlock(struct cio_chunk *ch)
