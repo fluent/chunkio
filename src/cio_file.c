@@ -755,7 +755,7 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
     }
 
     if (cio_chunk_is_up(ch) == CIO_FALSE) {
-        cio_log_error("[cio file] file is not mmap()ed: %s:%s",
+        cio_log_error(ch->ctx, "[cio file] file is not mmap()ed: %s:%s",
                       ch->st->name, ch->name);
         return -1;
     }
