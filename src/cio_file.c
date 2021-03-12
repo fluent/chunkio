@@ -1049,6 +1049,13 @@ int cio_file_fs_size_change(struct cio_file *cf, size_t new_size)
          * fallocate() is not portable, Linux only.
          */
         ret = fallocate(cf->fd, 0, 0, new_size);
+        if (ret == EOPNOTSUPP) {
+            /* If fallocate fails with an EOPNOTSUPP try operation using
+             * posix_fallocate. Required since some filesystems do not support
+             * the fallocate operation e.g. ext3 and reiserfs.
+             */
+            ret = posix_fallocate(cf->fd, 0, new_size);
+        }
     }
     else
 #endif
