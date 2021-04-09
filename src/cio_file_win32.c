@@ -788,7 +788,6 @@ int cio_file_up(struct cio_chunk *ch)
     }
 
     if (count_open_file_chunks(ch->ctx) >= ch->ctx->max_chunks_up) {
-        win32_chunk_error(ch, "[cio file] too many open chunks");
         return -1;
     }
     return cio_file_up_force(ch);
