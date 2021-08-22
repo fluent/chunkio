@@ -46,6 +46,7 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st,
     char *path;
     DIR *dir;
     struct dirent *ent;
+    char *entpath;
 
     len = strlen(ctx->root_path) + strlen(st->name) + 2;
     path = malloc(len);
@@ -100,6 +101,32 @@ static int cio_scan_stream_files(struct cio_ctx *ctx, struct cio_stream *st,
 
         /* register every directory as a stream */
         cio_chunk_open(ctx, st, ent->d_name, ctx->flags, 0, &err);
+
+        if (err == CIO_CORRUPTED) {
+            cio_log_debug(ctx, "[cio scan] Found corrupted chunk %s", ent->d_name);
+            len = strlen(path) + strlen(ent->d_name) + 2;
+            entpath = malloc(len);
+            if (!entpath) {
+                cio_errno();
+                cio_log_error(ctx, "[cio scan] Failed to delete corrupted chunk (failed to allocate path)");
+                continue;
+            }
+            ret = snprintf(entpath, len, "%s/%s", path, ent->d_name);
+            if (ret == -1) {
+                cio_errno();
+                free(entpath);
+                cio_log_error(ctx, "[cio scan] Failed to delete corrupted chunk (failed to construct path)");
+                continue;
+            }
+            ret = unlink(entpath);
+            if (ret == -1) {
+                cio_errno();
+                free(entpath);
+                cio_log_error(ctx, "[cio scan] Failed to delete corrupted chunk (failed to delete)");
+                continue;
+            }
+            free(entpath);
+        }
     }
 
     closedir(dir);
