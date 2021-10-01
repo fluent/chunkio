@@ -508,6 +508,24 @@ static inline int open_and_up(struct cio_ctx *ctx)
 }
 
 /*
+ * Fetch the file size regardless of if we opened this file or not.
+ */
+size_t cio_file_real_size(struct cio_file *cf)
+{
+    int ret;
+    struct stat st;
+
+    /* Store the current real size */
+    ret = stat(cf->path, &st);
+    if (ret == -1) {
+        cio_errno();
+        return 0;
+    }
+
+    return st.st_size;
+}
+
+/*
  * Open or create a data file: the following behavior is expected depending
  * of the passed flags:
  *
