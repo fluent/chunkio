@@ -336,9 +336,9 @@ size_t cio_file_real_size(struct cio_file *cf)
 {
     int ret;
 #ifdef _WIN64
-    struct __stat64 st;
+    struct _stat64 st;
 #else
-    struct __stat32 st;
+    struct _stat32 st;
 #endif
 
     /* Store the current real size */
