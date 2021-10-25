@@ -17,8 +17,10 @@
  *  limitations under the License.
  */
 
+#ifndef _WIN32
 #include <sys/mman.h>
 #include <arpa/inet.h>
+#endif
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
