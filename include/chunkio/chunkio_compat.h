@@ -72,6 +72,9 @@ static inline int getpagesize(void)
     GetSystemInfo(&system_info);
     return system_info.dwPageSize;
 }
+
+#define ftruncate(file_descriptor, new_size) _chsize(file_descriptor, new_size)
+
 #else
 #include <unistd.h>
 #include <libgen.h>
