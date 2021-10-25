@@ -36,6 +36,9 @@ struct cio_chunk {
     struct cio_ctx *ctx;      /* library context      */
     struct cio_stream *st;    /* stream context       */
 
+    /* error handling */
+    int error_n;
+
     /*
      * The state head links to the stream->chunks_up or stream->chunks_down
      * linked list.
