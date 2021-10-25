@@ -23,6 +23,8 @@
 #include <sys/types.h>
 #include <inttypes.h>
 
+#include <chunkio/chunkio_compat.h>
+
 struct cio_chunk {
     int lock;                 /* locked for write operations ? */
     char *name;               /* chunk name */
