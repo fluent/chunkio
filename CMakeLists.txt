@@ -98,6 +98,8 @@ add_subdirectory(deps/crc32)
 add_subdirectory(src)
 add_subdirectory(tools)
 
+# Tests
 if(CIO_TESTS)
+  enable_testing()
   add_subdirectory(tests)
 endif()

@@ -19,6 +19,9 @@
 
 #include <sys/mman.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_log.h>
