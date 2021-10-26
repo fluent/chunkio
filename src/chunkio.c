@@ -87,7 +87,7 @@ struct cio_ctx *cio_create(const char *root_path,
         return NULL;
     }
     mk_list_init(&ctx->streams);
-    ctx->page_size = getpagesize();
+    ctx->page_size = cio_getpagesize();
     ctx->max_chunks_up = CIO_MAX_CHUNKS_UP;
     ctx->flags = flags;
 
