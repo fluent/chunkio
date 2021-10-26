@@ -257,7 +257,7 @@ void cio_stream_destroy_all(struct cio_ctx *ctx)
 /* Return the total number of bytes being used by Chunks up in memory */
 size_t cio_stream_size_chunks_up(struct cio_stream *st)
 {
-    ssize_t bytes;
+    cio_ssize_t bytes;
     size_t total = 0;
     struct cio_chunk *ch;
     struct mk_list *head;
