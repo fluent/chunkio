@@ -599,7 +599,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
 
     cf->fd = -1;
     cf->flags = flags;
-    cf->realloc_size = getpagesize() * 8;
+    cf->realloc_size = ctx->page_size * 8;
     cf->st_content = NULL;
     cf->crc_cur = cio_crc32_init();
     cf->path = path;
