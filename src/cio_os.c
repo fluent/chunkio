@@ -50,7 +50,7 @@ int cio_os_isdir(const char *dir)
 }
 
 /* Create directory */
-int cio_os_mkpath(const char *dir, mode_t mode)
+int cio_os_mkpath(const char *dir, cio_mode_t mode)
 {
     struct stat st;
     char *dup_dir = NULL;
@@ -85,7 +85,7 @@ int cio_os_mkpath(const char *dir, mode_t mode)
     if (!dup_dir) {
         return 1;
     }
-    cio_os_mkpath(dirname(dup_dir), mode);
+    cio_os_mkpath(cio_dirname(dup_dir), mode);
     free(dup_dir);
     return mkdir(dir, mode);
 #endif
