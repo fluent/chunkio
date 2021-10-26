@@ -66,12 +66,15 @@ static inline char* dirname(const char *path)
     return buf;
 }
 
+#ifndef getpagesize
 static inline int getpagesize(void)
 {
     SYSTEM_INFO system_info;
     GetSystemInfo(&system_info);
     return system_info.dwPageSize;
 }
+#endif
+
 #else
 #include <unistd.h>
 #include <libgen.h>
