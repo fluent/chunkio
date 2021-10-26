@@ -23,6 +23,8 @@
 #include <stdlib.h>
 #include <inttypes.h>
 
+#include <chunkio/chunkio_compat.h>
+
 /*
  * ChunkIO data file layout as of 2018/10/26
  *
@@ -94,7 +96,7 @@ static inline char *cio_file_st_get_content(char *map)
     return map + CIO_FILE_HEADER_MIN + len;
 }
 
-static inline ssize_t cio_file_st_get_content_size(char *map, size_t size)
+static inline cio_ssize_t cio_file_st_get_content_size(char *map, size_t size)
 {
     int meta_len;
     size_t s;
