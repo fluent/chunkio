@@ -267,7 +267,7 @@ static int cb_cmd_stdin(struct cio_ctx *ctx, const char *stream,
     int err;
     int meta_len;
     size_t total = 0;
-    ssize_t bytes;
+    cio_ssize_t bytes;
     char buf[1024*8];
     struct cio_stream *st;
     struct cio_chunk *ch;
