@@ -25,6 +25,13 @@
 
 #include <chunkio/chunkio_compat.h>
 
+// #ifdef _WIN32
+// #include <windows.h>
+// typedef SSIZE_T cio_ssize_t;
+// #else
+// typedef ssize_t cio_ssize_t;
+// #endif
+
 struct cio_chunk {
     int lock;                 /* locked for write operations ? */
     char *name;               /* chunk name */
@@ -62,8 +69,8 @@ int cio_chunk_get_content(struct cio_chunk *ch, char **buf, size_t *size);
 int cio_chunk_get_content_copy(struct cio_chunk *ch,
                                void **out_buf, size_t *out_size);
 
-ssize_t cio_chunk_get_content_size(struct cio_chunk *ch);
-ssize_t cio_chunk_get_real_size(struct cio_chunk *ch);
+cio_ssize_t cio_chunk_get_content_size(struct cio_chunk *ch);
+cio_ssize_t cio_chunk_get_real_size(struct cio_chunk *ch);
 size_t cio_chunk_get_content_end_pos(struct cio_chunk *ch);
 void cio_chunk_close_stream(struct cio_stream *st);
 char *cio_chunk_hash(struct cio_chunk *ch);
