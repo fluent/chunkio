@@ -272,7 +272,7 @@ size_t cio_chunk_get_content_end_pos(struct cio_chunk *ch)
     return pos;
 }
 
-ssize_t cio_chunk_get_content_size(struct cio_chunk *ch)
+cio_ssize_t cio_chunk_get_content_size(struct cio_chunk *ch)
 {
     int type;
     struct cio_memfs *mf;
@@ -293,7 +293,7 @@ ssize_t cio_chunk_get_content_size(struct cio_chunk *ch)
     return -1;
 }
 
-ssize_t cio_chunk_get_real_size(struct cio_chunk *ch)
+cio_ssize_t cio_chunk_get_real_size(struct cio_chunk *ch)
 {
     int type;
     struct cio_memfs *mf;
