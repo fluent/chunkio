@@ -56,7 +56,7 @@ int cio_errno_print(int errnum, const char *file, int line)
 {
     char buf[256];
 
-    strerror_r(errnum, buf, sizeof(buf) - 1);
+    cio_strerror_r(errnum, buf, sizeof(buf) - 1);
     fprintf(stderr, "[%s:%i errno=%i] %s\n",
             file, line, errnum, buf);
     return 0;
