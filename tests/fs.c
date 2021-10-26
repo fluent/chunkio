@@ -39,6 +39,7 @@
 #define CIO_ENV           "/tmp/cio-fs-test/"
 #define CIO_FILE_400KB    CIO_TESTS_DATA_PATH "/data/400kb.txt"
 
+
 /* Logging callback, once called it just turn on the log_check flag */
 static int log_cb(struct cio_ctx *ctx, int level, const char *file, int line,
                   char *str)
@@ -421,7 +422,13 @@ static void test_issue_51()
         perror("open");
         exit(1);
     }
+
+#ifdef _WIN32
+    _chsize(fd, 1);
+#else
     ftruncate(fd, 1);
+#endif
+
     close(fd);
 
     /* Re-read the content */
