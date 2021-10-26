@@ -30,19 +30,28 @@
 #pragma comment(lib, "ws2_32.lib")
 
 /** mode flags for access() */
+
+#ifndef R_OK
 #define R_OK 04
 #define W_OK 02
 #define X_OK 01
 #define F_OK 00
+#endif
 
+#ifndef PATH_MAX
 #define PATH_MAX MAX_PATH
+#endif
+
+#ifndef S_ISREG
 #define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
-#define strerror_r(errno,buf,len) strerror_s(buf,len,errno)
+#endif
 
-typedef SSIZE_T ssize_t;
-typedef unsigned mode_t;
+#define cio_strerror_r(errno,buf,len) strerror_s(buf,len,errno)
 
-static inline char* dirname(const char *path)
+typedef SSIZE_T  cio_ssize_t;
+typedef unsigned cio_mode_t;
+
+static inline char* cio_dirname(const char *path)
 {
     char drive[_MAX_DRIVE];
     char dir[_MAX_DIR];
@@ -66,17 +75,27 @@ static inline char* dirname(const char *path)
     return buf;
 }
 
-static inline int getpagesize(void)
+static inline int cio_getpagesize(void)
 {
     SYSTEM_INFO system_info;
     GetSystemInfo(&system_info);
     return system_info.dwPageSize;
 }
+
 #else
 #include <unistd.h>
 #include <libgen.h>
 #include <dirent.h>
 #include <arpa/inet.h>
+
+#define cio_strerror_r(errno,buf,len) strerror_r(errno,buf,len)
+#define cio_getpagesize() getpagesize()
+#define cio_dirname(path) dirname(path)
+
+typedef ssize_t cio_ssize_t;
+typedef mode_t  cio_mode_t;
+
+
 #endif
 
 #endif
