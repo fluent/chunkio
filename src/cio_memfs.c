@@ -48,7 +48,7 @@ struct cio_memfs *cio_memfs_open(struct cio_ctx *ctx, struct cio_stream *st,
     }
     mf->buf_size = size;
     mf->buf_len = 0;
-    mf->realloc_size = getpagesize() * 8;
+    mf->realloc_size = ctx->page_size * 8;
 
     return mf;
 }
