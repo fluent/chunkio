@@ -21,6 +21,8 @@ else()
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D__FILENAME__=__FILE__")
 endif()
 
+include(cmake/macros.cmake)
+
 # ChunkIO options
 option(CIO_DEV               "Enable dev/test mode"         Off)
 option(CIO_LIB_STATIC        "Enable static library build"  On)
@@ -41,12 +43,6 @@ if(CIO_DEV)
   CIO_OPTION(CIO_LIB_STATIC             On)
 endif()
 
-# Macro to set definitions
-macro(CIO_DEFINITION var)
-  add_definitions(-D${var})
-  set(CIO_BUILD_FLAGS "${CIO_BUILD_FLAGS}#ifndef ${var}\n#define ${var}\n#endif\n")
-  set(CIO_INFO_FLAGS "${CIO_INFO_FLAGS} ${var}")
-endmacro()
 
 # Check if Address Sanitizer is enabled
 if(CIO_SANITIZE_ADDRESS OR SANITIZE_ADDRESS)
@@ -71,7 +67,19 @@ endif()
 
 include(CheckCSourceCompiles)
 
-# fallocate support
+# getpagesize(2) support
+check_c_source_compiles("
+  #include <unistd.h>
+  int main() {
+     getpagesize();
+     return 0;
+  }" CIO_HAVE_GETPAGESIZE)
+
+if(CIO_HAVE_GETPAGESIZE)
+  CIO_DEFINITION(CIO_HAVE_GETPAGESIZE)
+endif()
+
+# fallocate(2) support
 check_c_source_compiles("
   #include <fcntl.h>
   int main() {
@@ -82,6 +90,11 @@ check_c_source_compiles("
 if(CIO_HAVE_FALLOCATE)
   CIO_DEFINITION(CIO_HAVE_FALLOCATE)
 endif()
+
+configure_file(
+  "${PROJECT_SOURCE_DIR}/include/chunkio/cio_info.h.in"
+  "${PROJECT_SOURCE_DIR}/include/chunkio/cio_info.h"
+  )
 
 configure_file(
   "${PROJECT_SOURCE_DIR}/include/chunkio/cio_version.h.in"
