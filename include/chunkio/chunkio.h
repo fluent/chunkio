@@ -20,6 +20,7 @@
 #ifndef CHUNKIO_H
 #define CHUNKIO_H
 
+#include <chunkio/cio_info.h>
 #include <monkey/mk_core/mk_list.h>
 
 #define CIO_FALSE   0

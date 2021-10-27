@@ -29,8 +29,9 @@
 #include <sys/mman.h>
 #include <limits.h>
 
-#include <chunkio/chunkio_compat.h>
+
 #include <chunkio/chunkio.h>
+#include <chunkio/chunkio_compat.h>
 #include <chunkio/cio_crc32.h>
 #include <chunkio/cio_chunk.h>
 #include <chunkio/cio_file.h>
@@ -38,6 +39,7 @@
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_error.h>
+#include <chunkio/cio_utils.h>
 
 char cio_file_init_bytes[] =   {
     /* file type (2 bytes)    */
@@ -599,7 +601,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
 
     cf->fd = -1;
     cf->flags = flags;
-    cf->realloc_size = getpagesize() * 8;
+    cf->realloc_size = cio_getpagesize() * 8;
     cf->st_content = NULL;
     cf->crc_cur = cio_crc32_init();
     cf->path = path;
