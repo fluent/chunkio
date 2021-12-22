@@ -4,7 +4,9 @@ set(UNIT_TESTS_FILES
   context.c
   memfs.c
   stream.c
+  stats.c
   )
+
 if(CIO_BACKEND_FILESYSTEM)
   set(UNIT_TESTS_FILES
     ${UNIT_TESTS_FILES}
