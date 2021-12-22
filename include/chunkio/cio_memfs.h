@@ -50,5 +50,6 @@ int cio_memfs_close_stream(struct cio_stream *st);
 void cio_memfs_scan_dump(struct cio_ctx *ctx, struct cio_stream *st);
 int cio_memfs_content_copy(struct cio_chunk *ch,
                            void **out_buf, size_t *out_size);
+size_t cio_memfs_get_real_size(struct cio_chunk *ch);
 
 #endif

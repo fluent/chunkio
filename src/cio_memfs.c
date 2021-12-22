@@ -22,6 +22,7 @@
 #include <chunkio/chunkio_compat.h>
 #include <chunkio/cio_memfs.h>
 #include <chunkio/cio_log.h>
+#include <chunkio/cio_stats.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -142,4 +143,18 @@ void cio_memfs_scan_dump(struct cio_ctx *ctx, struct cio_stream *st)
         printf("        %-60s", tmp);
         printf("meta_len=%i, data_size=%lu\n", mf->meta_len, mf->buf_len);
     }
+}
+
+
+/*
+ * Get the real size of the chunk. For memmory based chunks, the real size
+ * belongs to the metadata length plus the real data content length.
+ */
+size_t cio_memfs_get_real_size(struct cio_chunk *ch)
+{
+    size_t size;
+    struct cio_memfs *mf = ch->backend;
+
+    size = mf->meta_len + mf->buf_len;
+    return size;
 }

@@ -21,6 +21,7 @@
 #define CHUNKIO_H
 
 #include <chunkio/cio_info.h>
+#include <chunkio/cio_stats_internal.h>
 #include <monkey/mk_core/mk_list.h>
 
 #define CIO_FALSE   0
@@ -68,6 +69,9 @@ struct cio_ctx {
      */
     size_t total_chunks;      /* Total number of registered chunks */
     size_t total_chunks_up;   /* Total number of chunks 'up' in memory */
+
+     /* stats */
+     struct cio_stats stats;
 
     /*
      * maximum open 'file' chunks: this limit helps where there are many

@@ -27,6 +27,7 @@
 #include <chunkio/cio_memfs.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_log.h>
+#include <chunkio/cio_stats.h>
 
 /*
  * Metadata is an optional information stored before the content of each file
@@ -41,10 +42,15 @@
  *
  * The caller might want to fix the performance penalties setting up some
  * empty metadata with specific sizes.
+ *
+ * Note that cio_meta_write() ovewrites the metadata content, it do not append
+ * content to the end of it, it does a full replacement.
  */
 
 int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
 {
+    int ret = -1;
+    size_t new_size;
     struct cio_memfs *mf;
 
     if (size > 65535) {
@@ -64,12 +70,16 @@ int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size)
         }
         memcpy(mf->meta_data, buf, size);
         mf->meta_len = size;
-        return 0;
+        ret = 0;
     }
     else if (ch->st->type == CIO_STORE_FS) {
-        return cio_file_write_metadata(ch, buf, size);
+        ret = cio_file_write_metadata(ch, buf, size);
     }
-    return -1;
+
+    new_size = cio_chunk_get_real_size(ch);
+    cio_stats_chunk_size_set(ch->ctx, ch, new_size);
+
+    return ret;
 }
 
 int cio_meta_size(struct cio_chunk *ch) {

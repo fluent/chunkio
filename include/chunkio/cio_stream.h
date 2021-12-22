@@ -20,6 +20,7 @@
 #ifndef CIO_STREAM_H
 #define CIO_STREAM_H
 
+#include <chunkio/cio_stats_internal.h>
 #include <monkey/mk_core/mk_list.h>
 
 struct cio_stream {
@@ -29,6 +30,10 @@ struct cio_stream {
     struct mk_list chunks;      /* list of all chunks in the stream */
     struct mk_list chunks_up;   /* list of chunks who are 'up'   */
     struct mk_list chunks_down; /* list of chunks who are 'down' */
+
+    /* stream chunks stats */
+    struct cio_stats_chunks stats;
+
     void *parent;               /* ref to parent ctx */
 };
 

@@ -27,6 +27,7 @@
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_scan.h>
+#include <chunkio/cio_stats.h>
 #include <chunkio/cio_utils.h>
 
 #include <monkey/mk_core/mk_list.h>
@@ -117,6 +118,7 @@ struct cio_ctx *cio_create(const char *root_path,
         ctx->root_path = NULL;
     }
 
+    cio_stats_init(&ctx->stats.stats);
     return ctx;
 }
 

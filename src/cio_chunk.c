@@ -23,6 +23,8 @@
 #include <chunkio/cio_file.h>
 #include <chunkio/cio_memfs.h>
 #include <chunkio/cio_log.h>
+#include <chunkio/cio_stats.h>
+
 #include <chunkio/cio_error.h>
 
 #include <string.h>
@@ -32,6 +34,7 @@ struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,
                                  int *err)
 {
     int len;
+    int is_up;
     void *backend = NULL;
     struct cio_chunk *ch;
 
@@ -94,16 +97,16 @@ struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,
 
     ch->backend = backend;
 
-    /* Adjust counter */
-    cio_chunk_counter_total_add(ctx);
-
-    /* Link the chunk state to the proper stream list */
-    if (cio_chunk_is_up(ch) == CIO_TRUE) {
+    is_up = cio_chunk_is_up(ch);
+    if (is_up) {
         mk_list_add(&ch->_state_head, &st->chunks_up);
     }
     else {
         mk_list_add(&ch->_state_head, &st->chunks_down);
     }
+
+    /* adjust stats */
+    cio_stats_chunk_open(ctx, ch);
 
     return ch;
 }
@@ -111,7 +114,6 @@ struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,
 void cio_chunk_close(struct cio_chunk *ch, int delete)
 {
     int type;
-    struct cio_ctx *ctx;
 
     if (!ch) {
         return;
@@ -119,7 +121,14 @@ void cio_chunk_close(struct cio_chunk *ch, int delete)
 
     cio_error_reset(ch);
 
-    ctx = ch->ctx;
+    /* stats */
+    cio_stats_chunk_close(ch->ctx, ch);
+
+    /* stats note: every backend perform it own stats adjustment, e.g:
+     *
+     * memory backend don't care about 'delete' status, so closing means a drop
+     * fs backend respect up/down status (open/close)
+     */
     type = ch->st->type;
     if (type == CIO_STORE_MEM) {
         cio_memfs_close(ch);
@@ -132,9 +141,6 @@ void cio_chunk_close(struct cio_chunk *ch, int delete)
     mk_list_del(&ch->_state_head);
     free(ch->name);
     free(ch);
-
-    /* Adjust counter */
-    cio_chunk_counter_total_sub(ctx);
 }
 
 /*
@@ -144,7 +150,9 @@ void cio_chunk_close(struct cio_chunk *ch, int delete)
 int cio_chunk_write_at(struct cio_chunk *ch, off_t offset,
                        const void *buf, size_t count)
 {
+    int ret;
     int type;
+    size_t new_size;
     struct cio_memfs *mf;
     struct cio_file *cf;
 
@@ -165,13 +173,22 @@ int cio_chunk_write_at(struct cio_chunk *ch, off_t offset,
      * By default backends (fs, mem) appends data after the it last position,
      * so we just adjust the content size to the given offset.
      */
-    return cio_chunk_write(ch, buf, count);
+    ret = cio_chunk_write(ch, buf, count);
+
+    /* new size */
+    new_size = cio_chunk_get_real_size(ch);
+
+    /* update stats */
+    cio_stats_chunk_size_set(ch->ctx, ch, new_size);
+
+    return ret;
 }
 
 int cio_chunk_write(struct cio_chunk *ch, const void *buf, size_t count)
 {
     int ret = 0;
     int type;
+    size_t new_size;
 
     cio_error_reset(ch);
 
@@ -183,6 +200,12 @@ int cio_chunk_write(struct cio_chunk *ch, const void *buf, size_t count)
         ret = cio_file_write(ch, buf, count);
     }
 
+    /* new size */
+    new_size = cio_chunk_get_real_size(ch);
+
+    /* update stats */
+    cio_stats_chunk_size_set(ch->ctx, ch, new_size);
+
     return ret;
 }
 
@@ -190,6 +213,7 @@ int cio_chunk_sync(struct cio_chunk *ch)
 {
     int ret = 0;
     int type;
+    size_t new_size;
 
     cio_error_reset(ch);
 
@@ -197,6 +221,12 @@ int cio_chunk_sync(struct cio_chunk *ch)
     if (type == CIO_STORE_FS) {
         ret = cio_file_sync(ch);
     }
+
+    /* new size */
+    new_size = cio_chunk_get_real_size(ch);
+
+    /* update stats */
+    cio_stats_chunk_size_set(ch->ctx, ch, new_size);
 
     return ret;
 }
@@ -296,25 +326,24 @@ ssize_t cio_chunk_get_content_size(struct cio_chunk *ch)
 ssize_t cio_chunk_get_real_size(struct cio_chunk *ch)
 {
     int type;
-    struct cio_memfs *mf;
     struct cio_file *cf;
 
     cio_error_reset(ch);
 
     type = ch->st->type;
     if (type == CIO_STORE_MEM) {
-        mf = ch->backend;
-        return mf->buf_len;
+        return cio_memfs_get_real_size(ch);
     }
     else if (type == CIO_STORE_FS) {
         cf = ch->backend;
 
         /* If the file is not open we need to explicitly get its size */
         if (cf->fs_size == 0) {
-            return cio_file_real_size(cf);
+            return cio_fs_get_real_size(ch);
         }
 
-        return cf->fs_size;
+        //FIXME return cf->fs_size;
+        return cio_fs_get_real_size(ch);
     }
 
     return -1;
@@ -524,6 +553,9 @@ int cio_chunk_down(struct cio_chunk *ch)
     if (type == CIO_STORE_FS) {
         ret = cio_file_down(ch);
         chunk_state_sync(ch);
+        if (ret == 0) {
+            //FIXME
+        }
         return ret;
     }
 
@@ -567,36 +599,4 @@ int cio_chunk_up_force(struct cio_chunk *ch)
 char *cio_version()
 {
     return CIO_VERSION_STR;
-}
-
-/*
- * Counters API
- */
-
-/* Increase the number of total chunks registered (+1) */
-size_t cio_chunk_counter_total_add(struct cio_ctx *ctx)
-{
-    ctx->total_chunks++;
-    return ctx->total_chunks;
-}
-
-/* Decrease the total number of chunks (-1) */
-size_t cio_chunk_counter_total_sub(struct cio_ctx *ctx)
-{
-    ctx->total_chunks--;
-    return ctx->total_chunks;
-}
-
-/* Increase the number of total chunks up in memory (+1) */
-size_t cio_chunk_counter_total_up_add(struct cio_ctx *ctx)
-{
-    ctx->total_chunks_up++;
-    return ctx->total_chunks_up;
-}
-
-/* Decrease the total number of chunks up in memory (-1) */
-size_t cio_chunk_counter_total_up_sub(struct cio_ctx *ctx)
-{
-    ctx->total_chunks_up--;
-    return ctx->total_chunks_up;
 }

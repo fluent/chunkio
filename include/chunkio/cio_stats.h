@@ -21,20 +21,33 @@
 #define CIO_STATS_H
 
 #include <chunkio/chunkio.h>
+#include <chunkio/cio_stream.h>
+#include <chunkio/cio_stats_internal.h>
 
-struct cio_stats {
-    /* Streams */
-    int streams_total;       /* total number of registered streams */
+#define CIO_STATS_GLOBAL   0
+#define CIO_STATS_STREAM   1
 
-    /* Chunks */
-    int chunks_total;        /* total number of registered chunks */
-    int chunks_mem;          /* number of chunks of memory type */
-    int chunks_fs;           /* number of chunks in file type */
-    int chunks_fs_up;        /* number of chunks in file type 'Up' in memory */
-    int chunks_fs_down;      /* number of chunks in file type 'down' */
-};
-
+void cio_stats_init(struct cio_stats_chunks *sc);
 void cio_stats_get(struct cio_ctx *ctx, struct cio_stats *stats);
 void cio_stats_print_summary(struct cio_ctx *ctx);
+
+void cio_stats_stream_create(struct cio_ctx *ctx, struct cio_stream *st);
+void cio_stats_stream_destroy(struct cio_ctx *ctx);
+
+void cio_stats_chunk_size_set(struct cio_ctx *ctx, struct cio_chunk *ch,
+                              size_t new_size);
+
+/* Initialize the stream counters by checking the chunk 'up' or 'down' status */
+void cio_stats_chunk_init(struct cio_ctx *ctx, struct cio_chunk *ch);
+
+/* Open and close a chunk */
+void cio_stats_chunk_open(struct cio_ctx *ctx, struct cio_chunk *ch);
+void cio_stats_chunk_close(struct cio_ctx *ctx, struct cio_chunk *ch);
+
+/* Chunk moves 'up' or 'down' */
+void cio_stats_chunk_up(struct cio_ctx *ctx, struct cio_chunk *ch);
+void cio_stats_chunk_down(struct cio_ctx *ctx, struct cio_chunk *ch);
+
+int cio_stats_validate(struct cio_ctx *ctx);
 
 #endif

@@ -28,6 +28,7 @@
 #include <chunkio/cio_chunk.h>
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_utils.h>
+#include <chunkio/cio_stats.h>
 
 #include <monkey/mk_core/mk_list.h>
 
@@ -174,14 +175,22 @@ struct cio_stream *cio_stream_create(struct cio_ctx *ctx, const char *name,
     mk_list_add(&st->_head, &ctx->streams);
 
     cio_log_debug(ctx, "[cio stream] new stream registered: %s", name);
+
+    cio_stats_stream_create(ctx, st);
     return st;
 }
 
 void cio_stream_destroy(struct cio_stream *st)
 {
+    struct cio_ctx *ctx;
+
     if (!st) {
         return;
     }
+
+    /* map parent context */
+    ctx = st->parent;
+
     /* close all files */
     cio_chunk_close_stream(st);
 
@@ -189,6 +198,8 @@ void cio_stream_destroy(struct cio_stream *st)
     mk_list_del(&st->_head);
     free(st->name);
     free(st);
+
+    cio_stats_stream_destroy(ctx);
 }
 
 /* Deletes a complete stream, this include all chunks available */

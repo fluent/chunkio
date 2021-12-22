@@ -41,6 +41,9 @@ struct cio_chunk {
     /* error handling */
     int error_n;
 
+    /* last size reported */
+    size_t last_size;
+
     /*
      * The state head links to the stream->chunks_up or stream->chunks_down
      * linked list.

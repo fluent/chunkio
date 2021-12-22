@@ -38,6 +38,7 @@
 #include <chunkio/cio_file_st.h>
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
+#include <chunkio/cio_stats.h>
 #include <chunkio/cio_error.h>
 #include <chunkio/cio_utils.h>
 
@@ -261,7 +262,7 @@ static int munmap_file(struct cio_ctx *ctx, struct cio_chunk *ch)
 
     /* Sync pending changes to disk */
     if (cf->synced == CIO_FALSE) {
-        ret = cio_file_sync(ch);
+        ret = cio_chunk_sync(ch);
         if (ret == -1) {
             cio_log_error(ch->ctx,
                           "[cio file] error syncing file at "
@@ -274,9 +275,6 @@ static int munmap_file(struct cio_ctx *ctx, struct cio_chunk *ch)
     cf->map = NULL;
     cf->data_size = 0;
     cf->alloc_size = 0;
-
-    /* Adjust counters */
-    cio_chunk_counter_total_up_sub(ctx);
 
     return 0;
 }
@@ -360,7 +358,6 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
     }
 
     /* Map the file */
-    size = ROUND_UP(size, ctx->page_size);
     cf->map = mmap(0, size, oflags, MAP_SHARED, cf->fd, 0);
     if (cf->map == MAP_FAILED) {
         cio_errno();
@@ -403,9 +400,6 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
 
     cf->st_content = cio_file_st_get_content(cf->map);
     cio_log_debug(ctx, "%s:%s mapped OK", ch->st->name, ch->name);
-
-    /* The mmap succeeded, adjust the counters */
-    cio_chunk_counter_total_up_add(ctx);
 
     return CIO_OK;
 }
@@ -617,6 +611,9 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
             cf->fs_size = f_st.st_size;
         }
 
+        /* Always set down bytes */
+        //FIXMEcio_stats_chunk_down(ctx, ch);
+
         /* we reached our limit, let the file 'down' */
         return cf;
     }
@@ -635,6 +632,13 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
         cio_file_close(ch, CIO_FALSE);
         *err = ret;
         return NULL;
+    }
+
+    /* Initialize stats for this chunk */
+    //cio_stats_chunk_init(ctx, ch);
+
+    if (cio_file_is_up(ch, cf)) {
+        //cio_stats_chunk_up(ctx, ch);
     }
 
     *err = CIO_OK;
@@ -706,6 +710,7 @@ static int _cio_file_up(struct cio_chunk *ch, int enforced)
         cf->fd = -1;
     }
 
+    cio_stats_chunk_up(ch->ctx, ch);
     return ret;
 }
 
@@ -743,12 +748,6 @@ int cio_file_down(struct cio_chunk *ch)
         return -1;
     }
 
-    /* unmap memory */
-    munmap_file(ch->ctx, ch);
-
-    /* Allocated map size is zero */
-    cf->alloc_size = 0;
-
     /* Get file size */
     ret = fstat(cf->fd, &st);
     if (ret == -1) {
@@ -758,6 +757,15 @@ int cio_file_down(struct cio_chunk *ch)
     else {
         cf->fs_size = st.st_size;
     }
+
+    /* Update metrics */
+    cio_stats_chunk_down(ch->ctx, ch);
+
+    /* unmap memory */
+    munmap_file(ch->ctx, ch);
+
+    /* Allocated map size is zero */
+    cf->alloc_size = 0;
 
     /* Close file descriptor */
     close(cf->fd);
@@ -1137,6 +1145,18 @@ int cio_file_fs_size_change(struct cio_file *cf, size_t new_size)
 char *cio_file_hash(struct cio_file *cf)
 {
     return (cf->map + 2);
+}
+
+/*
+ * Get the real size of the chunk.
+ */
+size_t cio_fs_get_real_size(struct cio_chunk *ch)
+{
+    size_t size;
+    struct cio_file *cf = ch->backend;
+
+    size = cf->fs_size;
+    return size;
 }
 
 void cio_file_hash_print(struct cio_file *cf)
