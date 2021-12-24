@@ -563,7 +563,9 @@ void test_fs_size_chunks_up()
             chunk_tmp = mk_list_entry_last(&stream->chunks_down,
                                            struct cio_chunk,
                                            _state_head);
-            TEST_CHECK(chunk_tmp == chunk);
+            if (!TEST_CHECK(chunk_tmp == chunk)) {
+                TEST_MSG("chunks down = %i\n", mk_list_size(&stream->chunks_down));
+            }
         }
     }
 
@@ -658,6 +660,9 @@ void test_issue_write_at()
     cf = (struct cio_file *) chunk->backend;
     TEST_CHECK(cf->map == NULL);
     TEST_CHECK(cf->fd <= 0);
+
+    /* Cleanup */
+    cio_destroy(ctx);
 }
 
 TEST_LIST = {
