@@ -406,7 +406,7 @@ static void print_error(const char *file, int line, int scope, const char *fmt, 
     int ret;
     va_list args;
     char buf[1024];
-    char *s;
+    char *s = "UNKNOWN";
 
     va_start(args, fmt);
     ret = vsnprintf(buf, sizeof(buf) - 1, fmt, args);
