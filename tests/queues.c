@@ -17,6 +17,10 @@
  *  limitations under the License.
  */
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_scan.h>
