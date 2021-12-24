@@ -5,6 +5,7 @@ set(UNIT_TESTS_FILES
   memfs.c
   stream.c
   stats.c
+  queues.c
   )
 
 if(CIO_BACKEND_FILESYSTEM)
