@@ -353,27 +353,6 @@ static void test_size_check_type(int type)
     cio_queue_chunk_add(ctx, q1, c4);
     TEST_CHECK(cio_stats_validate(ctx) == 0);
 
-        /* add chunk to queue */
-        //qch = cio_queue_chunk_add(ctx, qarr[i], carr[i]);
-        //TEST_CHECK(qch != NULL);
-
-        /* write some data */
-        //cio_chunk_write(carr[i], in_data, in_size);
-        //written += in_size;
-        //cio_chunk_sync(carr[i]);
-
-    /* Delete one chunk, this should remove 'up' and 'down' */
-    //cio_chunk_close(carr[0], CIO_FALSE);
-    //TEST_CHECK(cio_stats_validate(ctx) == 0);
-
-    /* Chunk down */
-    //cio_chunk_down(carr[1]);
-    //TEST_CHECK(cio_stats_validate(ctx) == 0);
-
-    /* Chunk up */
-    //cio_chunk_up(carr[1]);
-    //TEST_CHECK(cio_stats_validate(ctx) == 0);
-
     /* Release file data and destroy context */
     free(in_data);
     cio_destroy(ctx);
