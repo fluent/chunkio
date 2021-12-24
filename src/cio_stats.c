@@ -26,6 +26,7 @@
 #include <chunkio/cio_chunk.h>
 #include <chunkio/cio_stats.h>
 #include <chunkio/cio_macros.h>
+#include <chunkio/cio_queue.h>
 
 void cio_stats_init(struct cio_stats_chunks *sc)
 {
@@ -135,6 +136,8 @@ static void stats_chunk_down_add(struct cio_ctx *ctx, struct cio_chunk *ch,
 {
     struct cio_stream *st;
     struct cio_stats_chunks *stats;
+    struct mk_list *head;
+    struct cio_chunk_queue *ch_queue;
 
     /* global */
     stats = &ctx->stats.stats;
@@ -146,6 +149,14 @@ static void stats_chunk_down_add(struct cio_ctx *ctx, struct cio_chunk *ch,
     stats = &st->stats;
     stats->chunks_down_total++;
     stats->chunks_down_bytes_total += bytes;
+
+    /* queues */
+    mk_list_foreach(head, &ch->queues) {
+        ch_queue = mk_list_entry(head, struct cio_chunk_queue, _head);
+        stats = &ch_queue->queue->stats;
+        stats->chunks_down_total++;
+        stats->chunks_down_bytes_total += bytes;
+    }
 }
 
 static void stats_chunk_down_dec(struct cio_ctx *ctx, struct cio_chunk *ch,
@@ -153,6 +164,8 @@ static void stats_chunk_down_dec(struct cio_ctx *ctx, struct cio_chunk *ch,
 {
     struct cio_stream *st;
     struct cio_stats_chunks *stats;
+    struct mk_list *head;
+    struct cio_chunk_queue *ch_queue;
 
     /* global */
     stats = &ctx->stats.stats;
@@ -164,6 +177,14 @@ static void stats_chunk_down_dec(struct cio_ctx *ctx, struct cio_chunk *ch,
     stats = &st->stats;
     stats->chunks_down_total--;
     stats->chunks_down_bytes_total -= bytes;
+
+    /* queues */
+    mk_list_foreach(head, &ch->queues) {
+        ch_queue = mk_list_entry(head, struct cio_chunk_queue, _head);
+        stats = &ch_queue->queue->stats;
+        stats->chunks_down_total--;
+        stats->chunks_down_bytes_total -= bytes;
+    }
 }
 
 static void stats_chunk_up_add(struct cio_ctx *ctx, struct cio_chunk *ch,
@@ -171,6 +192,8 @@ static void stats_chunk_up_add(struct cio_ctx *ctx, struct cio_chunk *ch,
 {
     struct cio_stream *st;
     struct cio_stats_chunks *stats;
+    struct mk_list *head;
+    struct cio_chunk_queue *ch_queue;
 
     /* global */
     stats = &ctx->stats.stats;
@@ -182,6 +205,14 @@ static void stats_chunk_up_add(struct cio_ctx *ctx, struct cio_chunk *ch,
     stats = &st->stats;
     stats->chunks_up_total++;
     stats->chunks_up_bytes_total += bytes;
+
+    /* queues */
+    mk_list_foreach(head, &ch->queues) {
+        ch_queue = mk_list_entry(head, struct cio_chunk_queue, _head);
+        stats = &ch_queue->queue->stats;
+        stats->chunks_up_total++;
+        stats->chunks_up_bytes_total += bytes;
+    }
 }
 
 static void stats_chunk_up_dec(struct cio_ctx *ctx, struct cio_chunk *ch,
@@ -189,6 +220,8 @@ static void stats_chunk_up_dec(struct cio_ctx *ctx, struct cio_chunk *ch,
 {
     struct cio_stream *st;
     struct cio_stats_chunks *stats;
+    struct mk_list *head;
+    struct cio_chunk_queue *ch_queue;
 
     /* global */
     stats = &ctx->stats.stats;
@@ -200,6 +233,14 @@ static void stats_chunk_up_dec(struct cio_ctx *ctx, struct cio_chunk *ch,
     stats = &st->stats;
     stats->chunks_up_total--;
     stats->chunks_up_bytes_total -= bytes;
+
+    /* queues */
+    mk_list_foreach(head, &ch->queues) {
+        ch_queue = mk_list_entry(head, struct cio_chunk_queue, _head);
+        stats = &ch_queue->queue->stats;
+        stats->chunks_up_total--;
+        stats->chunks_up_bytes_total -= bytes;
+    }
 }
 
 void cio_stats_chunk_init(struct cio_ctx *ctx, struct cio_chunk *ch)
@@ -208,6 +249,8 @@ void cio_stats_chunk_init(struct cio_ctx *ctx, struct cio_chunk *ch)
     ssize_t bytes;
     struct cio_stream *st;
     struct cio_stats_chunks *stats;
+    struct mk_list *head;
+    struct cio_chunk_queue *ch_queue;
 
     bytes = cio_chunk_get_real_size(ch);
     if (bytes < 0) {
@@ -228,6 +271,15 @@ void cio_stats_chunk_init(struct cio_ctx *ctx, struct cio_chunk *ch)
     else {
         stats_chunk_down_add(ctx, ch, bytes);
     }
+
+    /* queues */
+    mk_list_foreach(head, &ch->queues) {
+        ch_queue = mk_list_entry(head, struct cio_chunk_queue, _head);
+        stats = &ch_queue->queue->stats;
+        stats->chunks_total++;
+        stats->chunks_bytes_total += bytes;
+    }
+
 }
 
 /* chunks: when a chunk is opened or created */
@@ -265,11 +317,16 @@ void cio_stats_chunk_close(struct cio_ctx *ctx, struct cio_chunk *ch)
     /* is the chunk 'up' ? */
     is_up = cio_chunk_is_up(ch);
 
+    /* global */
+    stats_chunk_close(&ctx->stats.stats, size, is_up, st->type);
+
     /* stream */
     stats_chunk_close(&st->stats, size, is_up, st->type);
 
-    /* global */
-    stats_chunk_close(&ctx->stats.stats, size, is_up, st->type);
+    /*
+     * queues: the cleanup of queues associated to the chunk are performed
+     * by cio_chunk_close() right after this call.
+     */
 }
 
 /*
@@ -282,6 +339,9 @@ void cio_stats_chunk_size_set(struct cio_ctx *ctx, struct cio_chunk *ch,
     int is_up;
     struct cio_stream *st = ch->st;
     size_t old_size;
+    struct mk_list *head;
+    struct cio_queue *queue;
+    struct cio_chunk_queue *ch_queue;
 
     old_size = last_size_get(ctx, ch);
     last_size_set(ctx, ch, new_size);
@@ -295,6 +355,14 @@ void cio_stats_chunk_size_set(struct cio_ctx *ctx, struct cio_chunk *ch,
     /* adding new bytes */
     stats_chunk_bytes_add(&st->stats, new_size, is_up, st->type);
     stats_chunk_bytes_add(&ctx->stats.stats, new_size, is_up, st->type);
+
+    /* remove and add bytes to queues */
+    mk_list_foreach(head, &ch->queues) {
+        ch_queue = mk_list_entry(head, struct cio_chunk_queue, _head);
+        queue = ch_queue->queue;
+        stats_chunk_bytes_sub(&queue->stats, old_size, is_up, st->type);
+        stats_chunk_bytes_add(&queue->stats, new_size, is_up, st->type);
+    }
 }
 
 /* A chunk is being set to an 'up' state */
@@ -353,6 +421,9 @@ static void print_error(const char *file, int line, int scope, const char *fmt, 
     else if (scope == CIO_STATS_STREAM) {
         s = "STREAM";
     }
+    else if (scope == CIO_STATS_QUEUE) {
+        s = "QUEUE";
+    }
 
     fprintf(stderr, "[%s%s cio stats exception%s] %s:%i: %s\n",
             CIO_ANSI_RED, s, CIO_ANSI_RESET, file, line, buf);
@@ -362,7 +433,7 @@ static void print_error(const char *file, int line, int scope, const char *fmt, 
     print_error(__FILENAME__, __LINE__, scope, fmt, ##__VA_ARGS__)
 
 static int stats_chunk_validate(struct cio_ctx *ctx, struct cio_stats_chunks *sc,
-                                struct cio_stream *st,
+                                struct cio_stream *st, struct cio_queue *queue,
                                 int scope)
 {
     int ret_code = 0;
@@ -382,39 +453,9 @@ static int stats_chunk_validate(struct cio_ctx *ctx, struct cio_stats_chunks *sc
     struct mk_list *head;
     struct mk_list *s_head;
     struct cio_chunk *ch;
+    struct cio_queue_chunk *qch;
 
-    if (st && scope == CIO_STATS_STREAM) {
-        /* count number of chunks per stream */
-        chunks_total += mk_list_size(&st->chunks);
-
-        /* count the total number of bytes used by chunks */
-        mk_list_foreach(s_head, &st->chunks) {
-            ch = mk_list_entry(s_head, struct cio_chunk, _head);
-
-            /* get the real size (bytes) reported */
-            s = cio_chunk_get_real_size(ch);
-            if (s < 0) {
-                STATS_ERROR(scope,
-                            "(chunks_total) chunk %s reports bad size: %i",
-                            ch->name, s);
-                continue;
-            }
-            chunks_bytes_total += s;
-
-            /* counters for chunks 'up/down' */
-            if (cio_chunk_is_up(ch)) {
-                /* up */
-                chunks_up_total++;
-                chunks_up_bytes_total += s;
-            }
-            else {
-                /* down */
-                chunks_down_total++;
-                chunks_down_bytes_total += s;
-            }
-        }
-    }
-    else {
+    if (scope == CIO_STATS_GLOBAL) {
         /* iterate all streams */
         mk_list_foreach(head, &ctx->streams) {
             st = mk_list_entry(head, struct cio_stream, _head);
@@ -447,6 +488,69 @@ static int stats_chunk_validate(struct cio_ctx *ctx, struct cio_stats_chunks *sc
                     chunks_down_total++;
                     chunks_down_bytes_total += s;
                 }
+            }
+        }
+    }
+    else if (scope == CIO_STATS_STREAM) {
+        /* count number of chunks per stream */
+        chunks_total += mk_list_size(&st->chunks);
+
+        /* count the total number of bytes used by chunks */
+        mk_list_foreach(s_head, &st->chunks) {
+            ch = mk_list_entry(s_head, struct cio_chunk, _head);
+
+            /* get the real size (bytes) reported */
+            s = cio_chunk_get_real_size(ch);
+            if (s < 0) {
+                STATS_ERROR(scope,
+                            "(chunks_total) chunk %s reports bad size: %i",
+                            ch->name, s);
+                continue;
+            }
+            chunks_bytes_total += s;
+
+            /* counters for chunks 'up/down' */
+            if (cio_chunk_is_up(ch)) {
+                /* up */
+                chunks_up_total++;
+                chunks_up_bytes_total += s;
+            }
+            else {
+                /* down */
+                chunks_down_total++;
+                chunks_down_bytes_total += s;
+            }
+        }
+    }
+    else if (scope == CIO_STATS_QUEUE) {
+        /* count number of chunks per stream */
+        chunks_total += mk_list_size(&queue->chunks);
+
+        /* count the total number of bytes used by chunks */
+        mk_list_foreach(s_head, &queue->chunks) {
+            qch = mk_list_entry(s_head, struct cio_queue_chunk, _head);
+            ch = qch->chunk;
+
+            /* get the real size (bytes) reported */
+            s = cio_chunk_get_real_size(ch);
+            if (s < 0) {
+                STATS_ERROR(scope,
+                            "(chunks_total) chunk %s reports bad size: %i",
+                            ch->name, s);
+                continue;
+            }
+            chunks_bytes_total += s;
+
+            /* counters for chunks 'up/down' */
+            if (cio_chunk_is_up(ch)) {
+                /* up */
+                chunks_up_total++;
+                chunks_up_bytes_total += s;
+            }
+            else {
+                /* down */
+                chunks_down_total++;
+                chunks_down_bytes_total += s;
             }
         }
     }
@@ -509,6 +613,7 @@ int cio_stats_validate(struct cio_ctx *ctx)
     struct cio_stream *st;
     struct cio_stats *stats;
     struct cio_stats_chunks *sc;
+    struct cio_queue *queue;
 
     /*
      * Global Stats
@@ -526,7 +631,7 @@ int cio_stats_validate(struct cio_ctx *ctx)
 
     /* cio_stats->stats (global chunk stats) */
     sc = &stats->stats;
-    ret = stats_chunk_validate(ctx, sc, NULL, CIO_STATS_GLOBAL);
+    ret = stats_chunk_validate(ctx, sc, NULL, NULL, CIO_STATS_GLOBAL);
     if (ret == -1) {
         ret_code = -1;
     }
@@ -538,7 +643,20 @@ int cio_stats_validate(struct cio_ctx *ctx)
     mk_list_foreach(head, &ctx->streams) {
         st = mk_list_entry(head, struct cio_stream, _head);
         sc = &st->stats;
-        ret = stats_chunk_validate(ctx, sc, st, CIO_STATS_STREAM);
+        ret = stats_chunk_validate(ctx, sc, st, NULL, CIO_STATS_STREAM);
+        if (ret == -1) {
+            ret_code = -1;
+        }
+    }
+
+    /*
+     * Queues Stats
+     * ------------
+     */
+    mk_list_foreach(head, &ctx->queues) {
+        queue = mk_list_entry(head, struct cio_queue, _head);
+        sc = &queue->stats;
+        ret = stats_chunk_validate(ctx, sc, NULL, queue, CIO_STATS_QUEUE);
         if (ret == -1) {
             ret_code = -1;
         }

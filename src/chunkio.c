@@ -29,6 +29,7 @@
 #include <chunkio/cio_scan.h>
 #include <chunkio/cio_stats.h>
 #include <chunkio/cio_utils.h>
+#include <chunkio/cio_queue.h>
 
 #include <monkey/mk_core/mk_list.h>
 
@@ -89,13 +90,11 @@ struct cio_ctx *cio_create(const char *root_path,
         return NULL;
     }
     mk_list_init(&ctx->streams);
+    mk_list_init(&ctx->queues);
+
     ctx->page_size = cio_getpagesize();
     ctx->max_chunks_up = CIO_MAX_CHUNKS_UP;
     ctx->flags = flags;
-
-    /* Counters */
-    ctx->total_chunks = 0;
-    ctx->total_chunks_up = 0;
 
     /* Logging */
     cio_set_log_callback(ctx, log_cb);
@@ -200,7 +199,12 @@ void cio_destroy(struct cio_ctx *ctx)
         return;
     }
 
+    /* destroy streams and chunks associated */
     cio_stream_destroy_all(ctx);
+
+    /* destroy queues */
+    cio_queue_destroy_all(ctx);
+
     free(ctx->root_path);
     free(ctx);
 }

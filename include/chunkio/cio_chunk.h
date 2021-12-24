@@ -2,7 +2,7 @@
 
 /*  Chunk I/O
  *  =========
- *  Copyright 2018 Eduardo Silva <eduardo@monkey.io>
+ *  Copyright 2018-2021 Eduardo Silva <eduardo@monkey.io>
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -51,6 +51,12 @@ struct cio_chunk {
     struct mk_list _state_head;
 
     struct mk_list _head;     /* head link to stream->files */
+
+    /*
+     * Queues: a queue can groups multiple chunks. A chunk can be associated
+     * to multiple queues.
+     */
+    struct mk_list queues;
 };
 
 struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,

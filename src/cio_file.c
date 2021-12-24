@@ -511,7 +511,8 @@ int cio_file_content_copy(struct cio_chunk *ch,
  */
 static inline int open_and_up(struct cio_ctx *ctx)
 {
-    if (ctx->total_chunks_up >= ctx->max_chunks_up) {
+
+    if (ctx->stats.stats.chunks_up_total >= ctx->max_chunks_up) {
         return CIO_FALSE;
     }
 
@@ -610,10 +611,6 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
         if (ret == 0) {
             cf->fs_size = f_st.st_size;
         }
-
-        /* Always set down bytes */
-        //FIXMEcio_stats_chunk_down(ctx, ch);
-
         /* we reached our limit, let the file 'down' */
         return cf;
     }

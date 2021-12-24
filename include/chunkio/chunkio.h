@@ -64,14 +64,8 @@ struct cio_ctx {
     int log_level;
     void (*log_cb)(void *, int, const char *, int, const char *);
 
-    /*
-     * Internal counters
-     */
-    size_t total_chunks;      /* Total number of registered chunks */
-    size_t total_chunks_up;   /* Total number of chunks 'up' in memory */
-
-     /* stats */
-     struct cio_stats stats;
+    /* stats */
+    struct cio_stats stats;
 
     /*
      * maximum open 'file' chunks: this limit helps where there are many
@@ -83,6 +77,9 @@ struct cio_ctx {
 
     /* streams */
     struct mk_list streams;
+
+    /* queues */
+    struct mk_list queues;
 };
 
 #include <chunkio/cio_stream.h>

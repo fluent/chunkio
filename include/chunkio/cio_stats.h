@@ -26,6 +26,7 @@
 
 #define CIO_STATS_GLOBAL   0
 #define CIO_STATS_STREAM   1
+#define CIO_STATS_QUEUE    2
 
 void cio_stats_init(struct cio_stats_chunks *sc);
 void cio_stats_get(struct cio_ctx *ctx, struct cio_stats *stats);

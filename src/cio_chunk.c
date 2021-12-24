@@ -24,6 +24,7 @@
 #include <chunkio/cio_memfs.h>
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stats.h>
+#include <chunkio/cio_queue.h>
 
 #include <chunkio/cio_error.h>
 
@@ -77,6 +78,9 @@ struct cio_chunk *cio_chunk_open(struct cio_ctx *ctx, struct cio_stream *st,
 
     mk_list_add(&ch->_head, &st->chunks);
 
+    /* init queues */
+    mk_list_init(&ch->queues);
+
     cio_error_reset(ch);
 
     /* create backend context */
@@ -123,6 +127,9 @@ void cio_chunk_close(struct cio_chunk *ch, int delete)
 
     /* stats */
     cio_stats_chunk_close(ch->ctx, ch);
+
+    /* queues */
+    cio_queue_chunk_del_all(ch->ctx, ch);
 
     /* stats note: every backend perform it own stats adjustment, e.g:
      *
@@ -342,7 +349,6 @@ ssize_t cio_chunk_get_real_size(struct cio_chunk *ch)
             return cio_fs_get_real_size(ch);
         }
 
-        //FIXME return cf->fs_size;
         return cio_fs_get_real_size(ch);
     }
 
