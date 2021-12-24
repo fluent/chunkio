@@ -7,6 +7,7 @@ set(src
   cio_scan.c
   cio_utils.c
   cio_stream.c
+  cio_queue.c
   cio_stats.c
   cio_error.c
   chunkio.c
