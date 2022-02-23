@@ -660,6 +660,76 @@ void test_issue_write_at()
     TEST_CHECK(cf->fd <= 0);
 }
 
+
+void test_fs_up_down_up_append()
+{
+    int ret;
+    int err;
+    struct cio_ctx *ctx;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+
+    void *out_buf;
+    size_t out_size;
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    /* Create a temporal storage */
+    ctx = cio_create(CIO_ENV, log_cb, CIO_LOG_DEBUG, CIO_CHECKSUM);
+    stream = cio_stream_create(ctx, "cio", CIO_STORE_FS);
+    chunk = cio_chunk_open(ctx, stream, "c", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        printf("cannot open chunk\n");
+        exit(1);
+    }
+
+    ret = cio_chunk_get_content_copy(chunk, &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(memcmp(out_buf, "", 1) == 0);
+    TEST_CHECK(out_size == 0);
+    free(out_buf);
+
+    ret = cio_chunk_write(chunk, "line 1\n", 7);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(memcmp(out_buf, "line 1\n", 7+1) == 0);
+    TEST_CHECK(out_size == 7);
+    free(out_buf);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(memcmp(out_buf, "line 1\n", 7+1) == 0);
+    TEST_CHECK(out_size == 7);
+    free(out_buf);
+
+    /* append */
+    ret = cio_chunk_write(chunk, "line 2\n", 7);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(memcmp(out_buf, "line 1\nline 2\n", 7*2+1) == 0);
+    TEST_CHECK(out_size == 7*2);
+    free(out_buf);
+
+    cio_destroy(ctx);
+}
+
 TEST_LIST = {
     {"fs_write",   test_fs_write},
     {"fs_checksum",  test_fs_checksum},
@@ -668,5 +738,6 @@ TEST_LIST = {
     {"issue_51",   test_issue_51},
     {"issue_flb_2025", test_issue_flb_2025},
     {"issue_write_at", test_issue_write_at},
+    {"fs_up_down_up_append", test_fs_up_down_up_append},
     { 0 }
 };
