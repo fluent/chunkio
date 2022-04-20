@@ -48,12 +48,12 @@ static void test_context()
 
     memset(&cio_opts, 0, sizeof(cio_opts));
 
-    cio_opts.log_cb = NULL;
-    cio_opts.log_level = CIO_LOG_INFO;
     cio_opts.flags = flags;
+    cio_opts.log_cb = NULL;
 
     /* Invalid path */
     cio_opts.root_path = "";
+    cio_opts.log_level = CIO_LOG_INFO;
 
     ctx = cio_create(&cio_opts);
     TEST_CHECK(ctx == NULL);
@@ -62,20 +62,20 @@ static void test_context()
     cio_opts.root_path = "/tmp/";
     cio_opts.log_level = -1;
 
-    ctx = cio_create(&opts);
+    ctx = cio_create(&cio_opts);
     TEST_CHECK(ctx == NULL);
 
     /* Invalid debug level 6 */
     cio_opts.log_level = 6;
 
-    ctx = cio_create(&opts);
+    ctx = cio_create(&cio_opts);
     TEST_CHECK(ctx == NULL);
 
     /* Valid context without callback */
     log_check = 0;
     cio_opts.log_level = CIO_LOG_INFO;
 
-    ctx = cio_create(&opts);
+    ctx = cio_create(&cio_opts);
     TEST_CHECK(ctx != NULL);
     cio_log_info(ctx, "test");
     TEST_CHECK(log_check == 0);
@@ -85,8 +85,7 @@ static void test_context()
     log_check = 0;
     cio_opts.log_cb = log_cb;
 
-    ctx = cio_create(&opts);
-    ctx = cio_create("/tmp/", log_cb, CIO_LOG_INFO, flags);
+    ctx = cio_create(&cio_opts);
     TEST_CHECK(ctx != NULL);
     cio_log_info(ctx, "test");
     TEST_CHECK(log_check == 1);
@@ -100,13 +99,13 @@ static void test_log_level()
 
     memset(&cio_opts, 0, sizeof(cio_opts));
 
-    cio_opts.root_path = "/tmp/";
-    cio_opts.log_cb = NULL;
-    cio_opts.log_level = CIO_LOG_INFO;
     cio_opts.flags = 0;
+    cio_opts.log_cb = NULL;
 
     /* Logging with unset callback at creation, but set later */
     log_check = 0;
+    cio_opts.root_path = "/tmp/";
+    cio_opts.log_level = CIO_LOG_INFO;
 
     ctx = cio_create(&cio_opts);
     TEST_CHECK(ctx != NULL);
