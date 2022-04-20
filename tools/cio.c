@@ -598,12 +598,6 @@ int main(int argc, char **argv)
     cio_opts.log_cb = log_cb;
     cio_opts.log_level = verbose;
 
-    if (config != NULL) {
-        cio_opts.user  = config->storage_user;
-        cio_opts.group = config->storage_group;
-        cio_opts.chmod = config->storage_chmod;
-    }
-
     /* Create CIO instance */
     ctx = cio_create(&cio_opts);
     if (root_path) {
