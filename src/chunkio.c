@@ -69,10 +69,20 @@ struct cio_ctx *cio_create(struct cio_options *options)
 {
     int ret;
     struct cio_ctx *ctx;
+    struct cio_options default_options;
+
+    memset(&default_options, 0, sizeof(default_options));
+
+    default_options.root_path = NULL;
+    default_options.user = NULL;
+    default_options.group = NULL;
+    default_options.chmod = NULL;
+    default_options.log_cb = NULL;
+    default_options.log_level = CIO_LOG_INFO;
+    default_options.flags = 0;
 
     if (options == NULL) {
-        fprintf(stderr, "[cio] options argument missing\n");
-        return NULL;
+        options = &default_options;
     }
 
     if (options->log_level < CIO_LOG_ERROR ||
