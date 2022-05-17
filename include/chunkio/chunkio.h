@@ -62,7 +62,7 @@ struct cio_options {
 
     /* logging */
     int log_level;
-    void (*log_cb)(struct cio_ctx *, int, const char *, int, const char *);
+    void (*log_cb)(struct cio_ctx *, int, const char *, int, char *);
 
     char *user;
     char *group;
