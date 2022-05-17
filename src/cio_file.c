@@ -359,10 +359,10 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
 
         cio_log_debug(ctx, "%s:%s adjusting size OK", ch->st->name, ch->name);
     }
+
     cf->alloc_size = size;
 
     /* Map the file */
-    size = ROUND_UP(size, ctx->page_size);
     cf->map = mmap(0, size, oflags, MAP_SHARED, cf->fd, 0);
     if (cf->map == MAP_FAILED) {
         cio_errno();
