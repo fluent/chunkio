@@ -1009,7 +1009,7 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
     void *tmp;
     size_t av_size;
     size_t new_size;
-    struct cio_file *cf = (struct cio_file *) ch->backend;
+    struct cio_file *cf;
 
     if (count == 0) {
         /* do nothing */
@@ -1019,6 +1019,8 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
     if (!ch) {
         return -1;
     }
+
+    cf = (struct cio_file *) ch->backend;
 
     if (cio_chunk_is_up(ch) == CIO_FALSE) {
         cio_log_error(ch->ctx, "[cio file] file is not mmap()ed: %s:%s",
