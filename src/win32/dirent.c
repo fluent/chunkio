@@ -89,6 +89,7 @@ struct CIO_WIN32_DIR *cio_win32_opendir(const char *path)
 
     d->pattern = create_pattern(path);
     if (d->pattern == NULL) {
+        free(d);
         return NULL;
     }
 
