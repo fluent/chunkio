@@ -1300,7 +1300,7 @@ int cio_file_sync(struct cio_chunk *ch)
  */
 int cio_file_fs_size_change(struct cio_file *cf, size_t new_size)
 {
-    int ret;
+    int ret = -1;
 
     /*
      * fallocate() is not portable an Linux only. Since macOS does not have
