@@ -36,6 +36,7 @@
 #include <chunkio/cio_crc32.h>
 #include <chunkio/cio_chunk.h>
 #include <chunkio/cio_file.h>
+#include <chunkio/cio_file_native.h>
 #include <chunkio/cio_file_st.h>
 #include <chunkio/cio_log.h>
 #include <chunkio/cio_stream.h>
@@ -271,8 +272,8 @@ static int munmap_file(struct cio_ctx *ctx, struct cio_chunk *ch)
     }
 
     /* Unmap file */
-    munmap(cf->map, cf->alloc_size);
-    cf->map = NULL;
+    cio_file_native_unmap(cf);
+
     cf->data_size = 0;
     cf->alloc_size = 0;
 
@@ -288,14 +289,13 @@ static int munmap_file(struct cio_ctx *ctx, struct cio_chunk *ch)
  */
 static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
 {
-    int ret;
-    int oflags = 0;
-    size_t fs_size = 0;
-    ssize_t content_size;
-    struct stat fst;
+    ssize_t          content_size;
+    size_t           fs_size;
+    int              ret;
     struct cio_file *cf;
 
     cf = (struct cio_file *) ch->backend;
+
     if (cf->map != NULL) {
         return CIO_OK;
     }
@@ -306,26 +306,20 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
      * fstat(2) of the file descriptor.
      */
 
+    fs_size = 0;
+
     if (size > 0) {
         fs_size = size;
     }
     else {
-        ret = fstat(cf->fd, &fst);
-        if (ret == -1) {
+        /* Get file size from the file system */
+        ret = cio_file_native_get_size(cf, &fs_size);
+
+        if (ret != CIO_OK) {
             cio_errno();
+
             return CIO_ERROR;
         }
-
-        /* Get file size from the file system */
-        fs_size = fst.st_size;
-    }
-
-    /* Mmap */
-    if (cf->flags & CIO_OPEN_RW) {
-        oflags = PROT_READ | PROT_WRITE;
-    }
-    else if (cf->flags & CIO_OPEN_RD) {
-        oflags = PROT_READ;
     }
 
     /* If the file is not empty, use file size for the memory map */
@@ -363,26 +357,29 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
     cf->alloc_size = size;
 
     /* Map the file */
-    cf->map = mmap(0, size, oflags, MAP_SHARED, cf->fd, 0);
-    if (cf->map == MAP_FAILED) {
-        cio_errno();
-        cf->map = NULL;
+    ret = cio_file_native_map(cf, cf->alloc_size);
+
+    if (ret != CIO_OK) {
         cio_log_error(ctx, "cannot mmap/read chunk '%s'", cf->path);
+
         return CIO_ERROR;
     }
 
     /* check content data size */
     if (fs_size > 0) {
         content_size = cio_file_st_get_content_size(cf->map, fs_size);
+
         if (content_size == -1) {
             cio_log_error(ctx, "invalid content size %s", cf->path);
-            munmap(cf->map, cf->alloc_size);
-            cf->map = NULL;
+
+            cio_file_native_unmap(cf);
+
             cf->data_size = 0;
             cf->alloc_size = 0;
 
             return CIO_CORRUPTED;
         }
+
         cf->data_size = content_size;
         cf->fs_size = fs_size;
     }
@@ -392,13 +389,16 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
     }
 
     ret = cio_file_format_check(ch, cf, cf->flags);
+
     if (ret != 0) {
         cio_log_error(ctx, "format check failed: %s/%s",
                       ch->st->name, ch->name);
-        munmap(cf->map, cf->alloc_size);
-        cf->map = NULL;
+
+        cio_file_native_unmap(cf);
+
         cf->data_size = 0;
         cf->alloc_size = 0;
+
         return CIO_CORRUPTED;
     }
 
@@ -413,250 +413,17 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
 
 int cio_file_lookup_user(char *user, void **result)
 {
-    long           query_buffer_size;
-    struct passwd *query_result;
-    char          *query_buffer;
-    struct passwd  passwd_entry;
-    int            api_result;
-
-    if (user == NULL) {
-        *result = calloc(1, sizeof(uid_t));
-
-        if (*result == NULL) {
-            cio_errno();
-
-            return CIO_ERROR;
-        }
-
-        **(uid_t **) result = (uid_t) -1;
-    }
-
-    query_buffer_size = sysconf(_SC_GETPW_R_SIZE_MAX);
-
-    if (query_buffer_size == -1) {
-        query_buffer_size = 4096 * 10;
-    }
-
-    query_buffer = calloc(1, query_buffer_size);
-
-    if (query_buffer == NULL) {
-        return CIO_ERROR;
-    }
-
-    query_result = NULL;
-
-    api_result = getpwnam_r(user, &passwd_entry, query_buffer,
-                            query_buffer_size, &query_result);
-
-    if (api_result != 0 || query_result == NULL) {
-        cio_errno();
-
-        free(query_buffer);
-
-        return CIO_ERROR;
-    }
-
-    *result = calloc(1, sizeof(uid_t));
-
-    if (*result == NULL) {
-        cio_errno();
-
-        free(query_buffer);
-
-        return CIO_ERROR;
-    }
-
-    **(uid_t **) result = query_result->pw_uid;
-
-    free(query_buffer);
-
-    return CIO_OK;
+    return cio_file_native_lookup_user(user, result);
 }
 
 int cio_file_lookup_group(char *group, void **result)
 {
-    long           query_buffer_size;
-    struct group  *query_result;
-    char          *query_buffer;
-    struct group   group_entry;
-    int            api_result;
-
-    if (group == NULL) {
-        *result = calloc(1, sizeof(gid_t));
-
-        if (*result == NULL) {
-            cio_errno();
-
-            return CIO_ERROR;
-        }
-
-        **(gid_t **) result = (gid_t) -1;
-    }
-
-    query_buffer_size = sysconf(_SC_GETGR_R_SIZE_MAX);
-
-    if (query_buffer_size == -1) {
-        query_buffer_size = 4096 * 10;
-    }
-
-    query_buffer = calloc(1, query_buffer_size);
-
-    if (query_buffer == NULL) {
-        return CIO_ERROR;
-    }
-
-    query_result = NULL;
-
-    api_result = getgrnam_r(group, &group_entry, query_buffer,
-                            query_buffer_size, &query_result);
-
-    if (api_result != 0 || query_result == NULL) {
-        cio_errno();
-
-        free(query_buffer);
-
-        return CIO_ERROR;
-    }
-
-    *result = calloc(1, sizeof(gid_t));
-
-    if (*result == NULL) {
-        cio_errno();
-
-        free(query_buffer);
-
-        return CIO_ERROR;
-    }
-
-    **(gid_t **) result = query_result->gr_gid;
-
-    free(query_buffer);
-
-    return CIO_OK;
-}
-
-static int apply_file_ownership_and_acl_settings(struct cio_ctx *ctx, char *path)
-{
-    mode_t filesystem_acl;
-    gid_t  numeric_group;
-    uid_t  numeric_user;
-    char  *connector;
-    int    result;
-    char  *group;
-    char  *user;
-
-    numeric_group = -1;
-    numeric_user = -1;
-
-    if (ctx->processed_user != NULL) {
-        numeric_user = *(uid_t *) ctx->processed_user;
-    }
-
-    if (ctx->processed_group != NULL) {
-        numeric_group = *(gid_t *) ctx->processed_group;
-    }
-
-    if (numeric_user != -1 || numeric_group != -1) {
-        result = chown(path, numeric_user, numeric_group);
-
-        if (result == -1) {
-            cio_errno();
-
-            user = ctx->options.user;
-            group = ctx->options.group;
-            connector = "with group";
-
-            if (user == NULL) {
-                user = "";
-                connector = "";
-            }
-
-            if (group == NULL) {
-                group = "";
-                connector = "";
-            }
-
-            cio_log_error(ctx, "cannot change ownership of %s to %s %s %s",
-                          path, user, connector, group);
-
-            return CIO_ERROR;
-        }
-    }
-
-    if (ctx->options.chmod != NULL) {
-        filesystem_acl = strtoul(ctx->options.chmod, NULL, 8);
-
-        result = chmod(path, filesystem_acl);
-
-        if (result == -1) {
-            cio_errno();
-            cio_log_error(ctx, "cannot change acl of %s to %s",
-                          path, ctx->options.user);
-
-            return CIO_ERROR;
-        }
-    }
-
-    return CIO_OK;
-}
-
-/* Open file system file, set file descriptor and file size */
-static int file_open(struct cio_ctx *ctx, struct cio_file *cf)
-{
-    int ret;
-    struct stat st;
-
-    if (cf->map || cf->fd > 0) {
-        return -1;
-    }
-
-    /* Open file descriptor */
-    if (cf->flags & CIO_OPEN_RW) {
-        cf->fd = open(cf->path, O_RDWR | O_CREAT, (mode_t) 0600);
-    }
-    else if (cf->flags & CIO_OPEN_RD) {
-        cf->fd = open(cf->path, O_RDONLY);
-    }
-
-    if (cf->fd == -1) {
-        cio_errno();
-        cio_log_error(ctx, "cannot open/create %s", cf->path);
-        return -1;
-    }
-
-    ret = apply_file_ownership_and_acl_settings(ctx, cf->path);
-    if (ret == CIO_ERROR) {
-        cio_errno();
-        close(cf->fd);
-        cf->fd = -1;
-        return -1;
-    }
-
-    /* Store the current real size */
-    ret = fstat(cf->fd, &st);
-    if (ret == -1) {
-        cio_errno();
-        close(cf->fd);
-        cf->fd = -1;
-        return -1;
-    }
-    cf->fs_size = st.st_size;
-
-    return 0;
+    return cio_file_native_lookup_group(group, result);
 }
 
 int cio_file_read_prepare(struct cio_ctx *ctx, struct cio_chunk *ch)
-
 {
-    int ret;
-    struct cio_file *cf = ch->backend;
-
-    if (!cf->map) {
-        ret = mmap_file(ctx, ch, 0);
-        return ret;
-    }
-
-    return 0;
+    return mmap_file(ctx, ch, 0);
 }
 
 int cio_file_content_copy(struct cio_chunk *ch,
@@ -727,17 +494,16 @@ static inline int open_and_up(struct cio_ctx *ctx)
  */
 size_t cio_file_real_size(struct cio_file *cf)
 {
-    int ret;
-    struct stat st;
+    size_t file_size;
+    int    ret;
 
-    /* Store the current real size */
-    ret = stat(cf->path, &st);
-    if (ret == -1) {
-        cio_errno();
+    ret = cio_file_native_get_size(cf, &file_size);
+
+    if (ret != CIO_OK) {
         return 0;
     }
 
-    return st.st_size;
+    return file_size;
 }
 
 /*
@@ -824,7 +590,7 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     }
 
     /* Open file (file descriptor and set file size) */
-    ret = file_open(ctx, cf);
+    ret = cio_file_native_open(ctx, cf);
     if (ret == -1) {
         cio_file_close(ch, CIO_FALSE);
         *err = CIO_ERROR;
@@ -876,7 +642,7 @@ static int _cio_file_up(struct cio_chunk *ch, int enforced)
     }
 
     /* Open file */
-    ret = file_open(ch->ctx, cf);
+    ret = cio_file_native_open(ch->ctx, cf);
     if (ret == -1) {
         cio_log_error(ch->ctx, "[cio file] cannot open chunk: %s/%s",
                       ch->st->name, ch->name);
@@ -904,8 +670,7 @@ static int _cio_file_up(struct cio_chunk *ch, int enforced)
          * descriptor, we never delete the Chunk at this stage since
          * the caller must take that action.
          */
-        close(cf->fd);
-        cf->fd = -1;
+        cio_file_native_close(cf);
     }
 
     return ret;
@@ -932,14 +697,28 @@ int cio_file_up_force(struct cio_chunk *ch)
     return _cio_file_up(ch, CIO_FALSE);
 }
 
+int cio_file_update_size(struct cio_file *cf)
+{
+    int result;
+
+    result = cio_file_native_get_size(cf, &cf->fs_size);
+
+    if (result != CIO_OK) {
+        cf->fs_size = 0;
+    }
+
+    return result;
+}
+
 /* Release memory and file descriptor resources but keep context */
 int cio_file_down(struct cio_chunk *ch)
 {
-    int ret;
-    struct stat st;
-    struct cio_file *cf = (struct cio_file *) ch->backend;
+    int              ret;
+    struct cio_file *cf;
 
-    if (!cf->map) {
+    cf = (struct cio_file *) ch->backend;
+
+    if (cf->map == NULL) {
         cio_log_error(ch->ctx, "[cio file] file is not mapped: %s/%s",
                       ch->st->name, ch->name);
         return -1;
@@ -951,30 +730,27 @@ int cio_file_down(struct cio_chunk *ch)
     /* Allocated map size is zero */
     cf->alloc_size = 0;
 
-    /* Get file size */
-    ret = fstat(cf->fd, &st);
-    if (ret == -1) {
+    /* Update the file size */
+    ret = cio_file_update_size(cf);
+
+    if (ret != CIO_OK) {
         cio_errno();
-        cf->fs_size = 0;
-    }
-    else {
-        cf->fs_size = st.st_size;
     }
 
     /* Close file descriptor */
-    close(cf->fd);
-    cf->fd = -1;
-    cf->map = NULL;
+    cio_file_native_close(cf);
 
     return 0;
 }
 
 void cio_file_close(struct cio_chunk *ch, int delete)
 {
-    int ret;
-    struct cio_file *cf = (struct cio_file *) ch->backend;
+    int              ret;
+    struct cio_file *cf;
 
-    if (!cf) {
+    cf = (struct cio_file *) ch->backend;
+
+    if (cf == NULL) {
         return;
     }
 
@@ -983,7 +759,8 @@ void cio_file_close(struct cio_chunk *ch, int delete)
 
     /* Should we delete the content from the file system ? */
     if (delete == CIO_TRUE) {
-        ret = unlink(cf->path);
+        ret = cio_file_native_delete(cf);
+
         if (ret == -1) {
             cio_errno();
             cio_log_error(ch->ctx,
@@ -993,9 +770,7 @@ void cio_file_close(struct cio_chunk *ch, int delete)
     }
 
     /* Close file descriptor */
-    if (cf->fd > 0) {
-        close(cf->fd);
-    }
+    cio_file_native_close(cf);
 
     free(cf->path);
     free(cf);
@@ -1006,8 +781,8 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
     int ret;
     int meta_len;
     int pre_content;
-    void *tmp;
     size_t av_size;
+    size_t old_size;
     size_t new_size;
     struct cio_file *cf;
 
@@ -1041,26 +816,20 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
             new_size += cf->realloc_size;
         }
 
+        old_size = cf->alloc_size;
         new_size = ROUND_UP(new_size, ch->ctx->page_size);
         ret = cio_file_fs_size_change(cf, new_size);
+
         if (ret == -1) {
             cio_errno();
             cio_log_error(ch->ctx,
                           "[cio_file] error setting new file size on write");
             return -1;
         }
-        /* OSX mman does not implement mremap or MREMAP_MAYMOVE. */
-#ifndef MREMAP_MAYMOVE
-        if (munmap(cf->map, cf->alloc_size) == -1) {
-            cio_errno();
-            return -1;
-        }
-        tmp = mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, cf->fd, 0);
-#else
-        tmp = mremap(cf->map, cf->alloc_size,
-                     new_size, MREMAP_MAYMOVE);
-#endif
-        if (tmp == MAP_FAILED) {
+
+        ret = cio_file_native_remap(cf, new_size);
+
+        if (ret != CIO_OK) {
             cio_errno();
             cio_log_error(ch->ctx,
                           "[cio file] data exceeds available space "
@@ -1071,10 +840,7 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
 
         cio_log_debug(ch->ctx,
                       "[cio file] alloc_size from %lu to %lu",
-                      cf->alloc_size, new_size);
-
-        cf->map = tmp;
-        cf->alloc_size = new_size;
+                      old_size, new_size);
     }
 
     if (ch->ctx->options.flags & CIO_CHECKSUM) {
@@ -1189,12 +955,21 @@ int cio_file_sync(struct cio_chunk *ch)
     int ret;
     int meta_len;
     int sync_mode;
-    void *tmp;
+    size_t file_size;
     size_t old_size;
     size_t av_size;
     size_t size;
-    struct stat fst;
-    struct cio_file *cf = (struct cio_file *) ch->backend;
+    struct cio_file *cf;
+
+    if (ch == NULL) {
+        return -1;
+    }
+
+    cf = (struct cio_file *) ch->backend;
+
+    if (cf == NULL) {
+        return -1;
+    }
 
     if (cf->flags & CIO_OPEN_RD) {
         return 0;
@@ -1204,9 +979,11 @@ int cio_file_sync(struct cio_chunk *ch)
         return 0;
     }
 
-    ret = fstat(cf->fd, &fst);
-    if (ret == -1) {
+    ret = cio_file_native_get_size(cf, &file_size);
+
+    if (ret != CIO_OK) {
         cio_errno();
+
         return -1;
     }
 
@@ -1226,7 +1003,7 @@ int cio_file_sync(struct cio_chunk *ch)
         }
         cf->alloc_size = size;
     }
-    else if (cf->alloc_size > fst.st_size) {
+    else if (cf->alloc_size > file_size) {
         ret = cio_file_fs_size_change(cf, cf->alloc_size);
         if (ret == -1) {
             cio_errno();
@@ -1236,20 +1013,11 @@ int cio_file_sync(struct cio_chunk *ch)
         }
     }
 
-
     /* If the mmap size changed, adjust mapping to the proper size */
     if (old_size != cf->alloc_size) {
-#ifndef MREMAP_MAYMOVE /* OSX */
-        if (munmap(cf->map, old_size) == -1) {
-            cio_errno();
-            return -1;
-        }
-        tmp = mmap(0, cf->alloc_size, PROT_READ | PROT_WRITE, MAP_SHARED,
-                   cf->fd, 0);
-#else
-        tmp = mremap(cf->map, old_size, cf->alloc_size, MREMAP_MAYMOVE);
-#endif
-        if (tmp == MAP_FAILED) {
+        ret = cio_file_native_remap(cf, cf->alloc_size);
+
+        if (ret != CIO_OK) {
             cio_errno();
             cio_log_error(ch->ctx,
                           "[cio file] cannot remap memory: old=%lu new=%lu",
@@ -1257,7 +1025,6 @@ int cio_file_sync(struct cio_chunk *ch)
             cf->alloc_size = old_size;
             return -1;
         }
-        cf->map = tmp;
     }
 
     /* Finalize CRC32 checksum */
@@ -1274,23 +1041,27 @@ int cio_file_sync(struct cio_chunk *ch)
     }
 
     /* Commit changes to disk */
-    ret = msync(cf->map, cf->alloc_size, sync_mode);
-    if (ret == -1) {
+    ret = cio_file_native_sync(cf, sync_mode);
+
+    if (ret != CIO_OK) {
         cio_errno();
+
         return -1;
     }
 
     cf->synced = CIO_TRUE;
 
-    ret = fstat(cf->fd, &fst);
-    if (ret == -1) {
+    ret = cio_file_update_size(cf);
+
+    if (ret != CIO_OK) {
         cio_errno();
+
         return -1;
     }
-    cf->fs_size = fst.st_size;
 
     cio_log_debug(ch->ctx, "[cio file] synced at: %s/%s",
                   ch->st->name, ch->name);
+
     return 0;
 }
 
@@ -1300,51 +1071,7 @@ int cio_file_sync(struct cio_chunk *ch)
  */
 int cio_file_fs_size_change(struct cio_file *cf, size_t new_size)
 {
-    int ret = -1;
-
-    /*
-     * fallocate() is not portable an Linux only. Since macOS does not have
-     * fallocate() we use ftruncate().
-     */
-#if defined(CIO_HAVE_FALLOCATE)
-    if (new_size > cf->alloc_size) {
-        retry:
-
-        if (cf->allocate_strategy == CIO_FILE_LINUX_FALLOCATE) {
-            /*
-             * To increase the file size we use fallocate() since this option
-             * will send a proper ENOSPC error if the file system ran out of
-             * space. ftruncate() will not fail and upon memcpy() over the
-             * mmap area it will trigger a 'Bus Error' crashing the program.
-             *
-             * fallocate() is not portable, Linux only.
-             */
-            ret = fallocate(cf->fd, 0, 0, new_size);
-            if (ret == -1 && errno == EOPNOTSUPP) {
-                /*
-                 * If fallocate fails with an EOPNOTSUPP try operation using
-                 * posix_fallocate. Required since some filesystems do not support
-                 * the fallocate operation e.g. ext3 and reiserfs.
-                 */
-                cf->allocate_strategy = CIO_FILE_LINUX_POSIX_FALLOCATE;
-                goto retry;
-            }
-        }
-        else if (cf->allocate_strategy == CIO_FILE_LINUX_POSIX_FALLOCATE) {
-            ret = posix_fallocate(cf->fd, 0, new_size);
-        }
-    }
-    else
-#endif
-    {
-        ret = ftruncate(cf->fd, new_size);
-    }
-
-    if (!ret) {
-        cf->fs_size = new_size;
-    }
-
-    return ret;
+    return cio_file_native_resize(cf, new_size);
 }
 
 char *cio_file_hash(struct cio_file *cf)
