@@ -77,5 +77,6 @@ int cio_file_up(struct cio_chunk *ch);
 int cio_file_up_force(struct cio_chunk *ch);
 int cio_file_lookup_user(char *user, void **result);
 int cio_file_lookup_group(char *group, void **result);
+int cio_file_update_size(struct cio_file *cf);
 
 #endif
