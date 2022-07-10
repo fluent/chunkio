@@ -1105,8 +1105,6 @@ int cio_file_resize(struct cio_file *cf, size_t new_size)
         result = cio_file_native_unmap(cf);
 
         if (result != CIO_OK) {
-            cio_file_native_report_error();
-
             return result;
         }
     }
@@ -1120,10 +1118,6 @@ int cio_file_resize(struct cio_file *cf, size_t new_size)
 #ifdef _WIN32
         if (mapped_flag) {
             inner_result = cio_file_native_map(cf, mapped_size);
-
-            if (inner_result != CIO_OK) {
-                cio_file_native_report_error();
-            }
         }
 #endif
 
@@ -1138,8 +1132,6 @@ int cio_file_resize(struct cio_file *cf, size_t new_size)
 #endif
 
         if (result != CIO_OK) {
-            cio_file_native_report_os_error();
-
             return result;
         }
     }
