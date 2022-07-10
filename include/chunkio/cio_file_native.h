@@ -22,14 +22,32 @@
 
 #include <chunkio/cio_file.h>
 
+
+
+#ifdef _WIN32
+#define cio_file_native_is_open(cf) (cf->backing_file != INVALID_HANDLE_VALUE)
+#define cio_file_native_is_mapped(cf) (cf->backing_mapping != INVALID_HANDLE_VALUE)
+#define cio_file_native_report_runtime_error() { cio_errno(); }
+#define cio_file_native_report_os_error() { cio_winapi_error(); }
+#else
+#define cio_file_native_is_open(cf) (cf->fd != -1)
+#define cio_file_native_is_mapped(cf) (cf->map != NULL)
+#define cio_file_native_report_runtime_error() { cio_errno(); }
+#define cio_file_native_report_os_error() { cio_errno(); }
+#endif
+
+int cio_file_native_apply_acl_and_settings(struct cio_ctx *ctx, struct cio_file *cf);
+char *cio_file_native_compose_path(char *root_path, char *stream_name, 
+                                   char *chunk_name);
 int cio_file_native_unmap(struct cio_file *cf);
 int cio_file_native_map(struct cio_file *cf, size_t map_size);
 int cio_file_native_remap(struct cio_file *cf, size_t new_size);
 int cio_file_native_lookup_user(char *user, void **result);
 int cio_file_native_lookup_group(char *group, void **result);
 int cio_file_native_get_size(struct cio_file *cf, size_t *file_size);
-int cio_file_native_open(struct cio_ctx *ctx, struct cio_file *cf);
-void cio_file_native_close(struct cio_file *cf);
+int cio_file_native_filename_check(char *name);
+int cio_file_native_open(struct cio_file *cf);
+int cio_file_native_close(struct cio_file *cf);
 int cio_file_native_delete(struct cio_file *cf);
 int cio_file_native_sync(struct cio_file *cf, int sync_mode);
 int cio_file_native_resize(struct cio_file *cf, size_t new_size);
