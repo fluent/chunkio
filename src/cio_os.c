@@ -53,7 +53,12 @@ int cio_os_isdir(const char *dir)
 int cio_os_mkpath(const char *dir, mode_t mode)
 {
     struct stat st;
-    char *dup_dir = NULL;
+
+#ifdef _WIN32
+    char path[MAX_PATH];
+#else
+    char *dup_dir;
+#endif
 
     if (!dir) {
         errno = EINVAL;
@@ -70,7 +75,7 @@ int cio_os_mkpath(const char *dir, mode_t mode)
     }
 
 #ifdef _WIN32
-    char path[MAX_PATH];
+    (void) mode;
 
     if (_fullpath(path, dir, MAX_PATH) == NULL) {
         return 1;
