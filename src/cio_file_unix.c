@@ -49,17 +49,25 @@ int cio_file_native_unmap(struct cio_file *cf)
     int ret;
 
     if (cf == NULL) {
-        return -1;
+        return CIO_ERROR;
+    }
+
+    if (!cio_file_native_is_mapped(cf)) {
+        return CIO_OK;
     }
 
     ret = munmap(cf->map, cf->alloc_size);
 
-    if (ret == 0)
-    {
-        cf->map = NULL;
+    if (ret != 0) {
+        cio_file_native_report_os_error();
+
+        return CIO_ERROR;
     }
 
-    return ret;
+    cf->alloc_size = 0;
+    cf->map = NULL;
+
+    return CIO_OK;
 }
 
 int cio_file_native_map(struct cio_file *cf, size_t map_size)
@@ -70,7 +78,11 @@ int cio_file_native_map(struct cio_file *cf, size_t map_size)
         return CIO_ERROR;
     }
 
-    if (cf->map != NULL) {
+    if (!cio_file_native_is_open(cf)) {
+        return CIO_ERROR;
+    }
+
+    if (cio_file_native_is_mapped(cf)) {
         return CIO_OK;
     }
 
@@ -81,16 +93,18 @@ int cio_file_native_map(struct cio_file *cf, size_t map_size)
         flags = PROT_READ;
     }
     else {
-        flags = 0;
+        return CIO_ERROR;
     }
 
     cf->map = mmap(0, map_size, flags, MAP_SHARED, cf->fd, 0);
 
     if (cf->map == MAP_FAILED) {
-        cio_errno();
+        cio_file_native_report_os_error();
 
         return CIO_ERROR;
     }
+
+    cf->alloc_size = map_size;
 
     return CIO_OK;
 }
@@ -107,7 +121,7 @@ int cio_file_native_remap(struct cio_file *cf, size_t new_size)
     result = cio_file_native_unmap(cf);
 
     if (result == -1) {
-        return CIO_ERROR;
+        return result;
     }
 
     tmp = mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, cf->fd, 0);
@@ -118,6 +132,8 @@ int cio_file_native_remap(struct cio_file *cf, size_t new_size)
 #endif
 
     if (tmp == MAP_FAILED) {
+        cio_file_native_report_os_error();
+
         return CIO_ERROR;
     }
 
@@ -139,7 +155,7 @@ int cio_file_native_lookup_user(char *user, void **result)
         *result = calloc(1, sizeof(uid_t));
 
         if (*result == NULL) {
-            cio_errno();
+            cio_file_native_report_runtime_error();
 
             return CIO_ERROR;
         }
@@ -165,7 +181,7 @@ int cio_file_native_lookup_user(char *user, void **result)
                             query_buffer_size, &query_result);
 
     if (api_result != 0 || query_result == NULL) {
-        cio_errno();
+        cio_file_native_report_os_error();
 
         free(query_buffer);
 
@@ -175,7 +191,7 @@ int cio_file_native_lookup_user(char *user, void **result)
     *result = calloc(1, sizeof(uid_t));
 
     if (*result == NULL) {
-        cio_errno();
+        cio_file_native_report_runtime_error();
 
         free(query_buffer);
 
@@ -201,7 +217,7 @@ int cio_file_native_lookup_group(char *group, void **result)
         *result = calloc(1, sizeof(gid_t));
 
         if (*result == NULL) {
-            cio_errno();
+            cio_file_native_report_runtime_error();
 
             return CIO_ERROR;
         }
@@ -227,7 +243,7 @@ int cio_file_native_lookup_group(char *group, void **result)
                             query_buffer_size, &query_result);
 
     if (api_result != 0 || query_result == NULL) {
-        cio_errno();
+        cio_file_native_report_os_error();
 
         free(query_buffer);
 
@@ -237,7 +253,7 @@ int cio_file_native_lookup_group(char *group, void **result)
     *result = calloc(1, sizeof(gid_t));
 
     if (*result == NULL) {
-        cio_errno();
+        cio_file_native_report_runtime_error();
 
         free(query_buffer);
 
@@ -251,15 +267,12 @@ int cio_file_native_lookup_group(char *group, void **result)
     return CIO_OK;
 }
 
-static int apply_file_ownership_and_acl_settings(struct cio_ctx *ctx, char *path)
+int cio_file_native_apply_acl_and_settings(struct cio_ctx *ctx, struct cio_file *cf)
 {
     mode_t filesystem_acl;
     gid_t  numeric_group;
     uid_t  numeric_user;
-    char  *connector;
     int    result;
-    char  *group;
-    char  *user;
 
     numeric_group = -1;
     numeric_user = -1;
@@ -273,27 +286,10 @@ static int apply_file_ownership_and_acl_settings(struct cio_ctx *ctx, char *path
     }
 
     if (numeric_user != -1 || numeric_group != -1) {
-        result = chown(path, numeric_user, numeric_group);
+        result = chown(cf->path, numeric_user, numeric_group);
 
         if (result == -1) {
-            cio_errno();
-
-            user = ctx->options.user;
-            group = ctx->options.group;
-            connector = "with group";
-
-            if (user == NULL) {
-                user = "";
-                connector = "";
-            }
-
-            if (group == NULL) {
-                group = "";
-                connector = "";
-            }
-
-            cio_log_error(ctx, "cannot change ownership of %s to %s %s %s",
-                          path, user, connector, group);
+            cio_file_native_report_os_error();
 
             return CIO_ERROR;
         }
@@ -302,12 +298,13 @@ static int apply_file_ownership_and_acl_settings(struct cio_ctx *ctx, char *path
     if (ctx->options.chmod != NULL) {
         filesystem_acl = strtoul(ctx->options.chmod, NULL, 8);
 
-        result = chmod(path, filesystem_acl);
+        result = chmod(cf->path, filesystem_acl);
 
         if (result == -1) {
-            cio_errno();
+            cio_file_native_report_os_error();
+
             cio_log_error(ctx, "cannot change acl of %s to %s",
-                          path, ctx->options.user);
+                          cf->path, ctx->options.user);
 
             return CIO_ERROR;
         }
@@ -323,7 +320,7 @@ int cio_file_native_get_size(struct cio_file *cf, size_t *file_size)
 
     ret = -1;
 
-    if (cf->fd != -1) {
+    if (cio_file_native_is_open(cf)) {
         ret = fstat(cf->fd, &st);
     }
 
@@ -342,13 +339,63 @@ int cio_file_native_get_size(struct cio_file *cf, size_t *file_size)
     return CIO_OK;
 }
 
-/* Open file system file, set file descriptor and file size */
-int cio_file_native_open(struct cio_ctx *ctx, struct cio_file *cf)
+char *cio_file_native_compose_path(char *root_path, char *stream_name,
+                                   char *chunk_name)
 {
+    size_t psize;
+    char  *path;
     int    ret;
 
-    if (cf->map != NULL || cf->fd != -1) {
-        return -1;
+    /* Compose path for the file */
+    psize = strlen(root_path) +
+            strlen(stream_name) +
+            strlen(chunk_name) +
+            8;
+
+    path = malloc(psize);
+
+    if (path == NULL) {
+        cio_file_native_report_runtime_error();
+
+        return NULL;
+    }
+
+    ret = snprintf(path, psize, "%s/%s/%s",
+                   root_path, stream_name, chunk_name);
+
+    if (ret == -1) {
+        cio_file_native_report_runtime_error();
+
+        free(path);
+
+        return NULL;
+    }
+
+    return path;
+}
+
+int cio_file_native_filename_check(char *name)
+{
+    size_t len;
+
+    len = strlen(name);
+
+    if (len == 0) {
+        return CIO_ERROR;
+    }
+    if (len == 1) {
+        if ((name[0] == '.' || name[0] == '/')) {
+            return CIO_ERROR;
+        }
+    }
+
+    return CIO_OK;
+}
+
+int cio_file_native_open(struct cio_file *cf)
+{
+    if (cio_file_native_is_open(cf)) {
+        return CIO_OK;
     }
 
     /* Open file descriptor */
@@ -360,53 +407,73 @@ int cio_file_native_open(struct cio_ctx *ctx, struct cio_file *cf)
     }
 
     if (cf->fd == -1) {
-        cio_errno();
-        cio_log_error(ctx, "cannot open/create %s", cf->path);
+        cio_file_native_report_os_error();
 
-        return -1;
+        return CIO_ERROR;
     }
 
-    ret = apply_file_ownership_and_acl_settings(ctx, cf->path);
-
-    if (ret == CIO_ERROR) {
-        cio_errno();
-        cio_file_native_close(cf);
-
-        return -1;
-    }
-
-    ret = cio_file_update_size(cf);
-
-    if (ret != CIO_OK) {
-        cio_file_native_close(cf);
-
-        return -1;
-    }
-
-    return 0;
+    return CIO_OK;
 }
 
-void cio_file_native_close(struct cio_file *cf)
+int cio_file_native_close(struct cio_file *cf)
 {
-    if (cf != NULL && cf->fd != 0) {
-        close(cf->fd);
+    int result;
+
+    if (cf == NULL) {
+        return CIO_ERROR;
+    }
+
+    if (cio_file_native_is_open(cf)) {
+        result = close(cf->fd);
+
+        if (result == -1) {
+            cio_file_native_report_os_error();
+
+            return CIO_ERROR;
+        }
 
         cf->fd = -1;
     }
+
+    return CIO_OK;
 }
 
 int cio_file_native_delete(struct cio_file *cf)
 {
-    return unlink(cf->path);
+    int result;
+
+    if (cio_file_native_is_open(cf) ||
+        cio_file_native_is_mapped(cf)) {
+        return CIO_ERROR;
+    }
+
+    result = unlink(cf->path);
+
+    if (result == -1) {
+        cio_file_native_report_os_error();
+
+        return CIO_ERROR;
+    }
+
+    return CIO_OK;
 }
 
 int cio_file_native_sync(struct cio_file *cf, int sync_mode)
 {
     int result;
 
+    if (sync_mode & CIO_FULL_SYNC) {
+        sync_mode = MS_SYNC;
+    }
+    else {
+        sync_mode = MS_ASYNC;
+    }
+
     result = msync(cf->map, cf->alloc_size, sync_mode);
 
     if (result == -1) {
+        cio_file_native_report_os_error();
+
         return CIO_ERROR;
     }
 
@@ -415,7 +482,9 @@ int cio_file_native_sync(struct cio_file *cf, int sync_mode)
 
 int cio_file_native_resize(struct cio_file *cf, size_t new_size)
 {
-    int ret = -1;
+    int result;
+
+    result = -1;
 
     /*
      * fallocate() is not portable an Linux only. Since macOS does not have
@@ -434,8 +503,8 @@ int cio_file_native_resize(struct cio_file *cf, size_t new_size)
              *
              * fallocate() is not portable, Linux only.
              */
-            ret = fallocate(cf->fd, 0, 0, new_size);
-            if (ret == -1 && errno == EOPNOTSUPP) {
+            result = fallocate(cf->fd, 0, 0, new_size);
+            if (result == -1 && errno == EOPNOTSUPP) {
                 /*
                  * If fallocate fails with an EOPNOTSUPP try operation using
                  * posix_fallocate. Required since some filesystems do not support
@@ -446,18 +515,21 @@ int cio_file_native_resize(struct cio_file *cf, size_t new_size)
             }
         }
         else if (cf->allocate_strategy == CIO_FILE_LINUX_POSIX_FALLOCATE) {
-            ret = posix_fallocate(cf->fd, 0, new_size);
+            result = posix_fallocate(cf->fd, 0, new_size);
         }
     }
     else
 #endif
     {
-        ret = ftruncate(cf->fd, new_size);
+        result = ftruncate(cf->fd, new_size);
     }
 
-    if (!ret) {
+    if (result) {
+        cio_file_native_report_os_error();
+    }
+    else {
         cf->fs_size = new_size;
     }
 
-    return ret;
+    return result;
 }
