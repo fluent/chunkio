@@ -359,10 +359,10 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
 
         cio_log_debug(ctx, "%s:%s adjusting size OK", ch->st->name, ch->name);
     }
+
     cf->alloc_size = size;
 
     /* Map the file */
-    size = ROUND_UP(size, ctx->page_size);
     cf->map = mmap(0, size, oflags, MAP_SHARED, cf->fd, 0);
     if (cf->map == MAP_FAILED) {
         cio_errno();
@@ -1009,7 +1009,7 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
     void *tmp;
     size_t av_size;
     size_t new_size;
-    struct cio_file *cf = (struct cio_file *) ch->backend;
+    struct cio_file *cf;
 
     if (count == 0) {
         /* do nothing */
@@ -1019,6 +1019,8 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
     if (!ch) {
         return -1;
     }
+
+    cf = (struct cio_file *) ch->backend;
 
     if (cio_chunk_is_up(ch) == CIO_FALSE) {
         cio_log_error(ch->ctx, "[cio file] file is not mmap()ed: %s:%s",
@@ -1298,7 +1300,7 @@ int cio_file_sync(struct cio_chunk *ch)
  */
 int cio_file_fs_size_change(struct cio_file *cf, size_t new_size)
 {
-    int ret;
+    int ret = -1;
 
     /*
      * fallocate() is not portable an Linux only. Since macOS does not have
@@ -1352,7 +1354,7 @@ char *cio_file_hash(struct cio_file *cf)
 
 void cio_file_hash_print(struct cio_file *cf)
 {
-    printf("crc cur=%u\n", cf->crc_cur);
+    printf("crc cur=%lu\n", (long unsigned int)cf->crc_cur);
     printf("%08lx\n", (long unsigned int ) cf->crc_cur);
 }
 
