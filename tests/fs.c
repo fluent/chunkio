@@ -803,6 +803,52 @@ void test_fs_up_down_up_append()
     cio_destroy(ctx);
 }
 
+static void test_deep_hierarchy()
+{
+    int i;
+    int ret;
+    int err;
+    int len;
+    char line[] = "this is a test line\n";
+    struct cio_ctx *ctx;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+
+    cio_utils_recursive_delete("tmp");
+
+    /* Create a temporal storage */
+    memset(&cio_opts, 0, sizeof(cio_opts));
+
+    cio_opts.root_path = "tmp/deep/log/dir";
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_DEBUG;
+    cio_opts.flags = 0;
+
+    ctx = cio_create(&cio_opts);
+    stream = cio_stream_create(ctx, "test", CIO_STORE_FS);
+    chunk = cio_chunk_open(ctx, stream, "c", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        printf("cannot open chunk\n");
+        exit(1);
+    }
+
+    len = strlen(line);
+    for (i = 0; i < 1000; i++) {
+        ret = cio_chunk_write(chunk, line, len);
+        TEST_CHECK(ret == CIO_OK);
+
+        ret = cio_chunk_down(chunk);
+        TEST_CHECK(ret == CIO_OK);
+
+        ret = cio_chunk_up(chunk);
+        TEST_CHECK(ret == CIO_OK);
+    }
+
+    cio_destroy(ctx);
+}
+
 TEST_LIST = {
     {"fs_write",   test_fs_write},
     {"fs_checksum",  test_fs_checksum},
@@ -812,5 +858,6 @@ TEST_LIST = {
     {"issue_flb_2025", test_issue_flb_2025},
     {"issue_write_at", test_issue_write_at},
     {"fs_up_down_up_append", test_fs_up_down_up_append},
+    {"fs_deep_hierachy", test_deep_hierarchy},
     { 0 }
 };
