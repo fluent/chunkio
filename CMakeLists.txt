@@ -93,12 +93,12 @@ endif()
 
 configure_file(
   "${PROJECT_SOURCE_DIR}/include/chunkio/cio_info.h.in"
-  "${PROJECT_BINARY_DIR}/include/chunkio/cio_info.h"
+  "${PROJECT_SOURCE_DIR}/include/chunkio/cio_info.h"
   )
 
 configure_file(
   "${PROJECT_SOURCE_DIR}/include/chunkio/cio_version.h.in"
-  "${PROJECT_BINARY_DIR}/include/chunkio/cio_version.h"
+  "${PROJECT_SOURCE_DIR}/include/chunkio/cio_version.h"
   )
 
 include_directories(
