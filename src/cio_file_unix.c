@@ -119,10 +119,8 @@ int cio_file_native_remap(struct cio_file *cf, size_t new_size)
     if (new_size > cf->alloc_size) {
 /* OSX mman does not implement mremap or MREMAP_MAYMOVE. */
 #ifndef MREMAP_MAYMOVE
-        result = munmap(cf->map, cf->alloc_size);
+        result = cio_file_native_unmap(cf);
         if (result != 0) {
-            cio_file_native_report_os_error();
-
             return CIO_ERROR;
         }
 
