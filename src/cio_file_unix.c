@@ -112,33 +112,37 @@ int cio_file_native_map(struct cio_file *cf, size_t map_size)
 int cio_file_native_remap(struct cio_file *cf, size_t new_size)
 {
     int   result;
-    void *tmp;
+    void *tmp = NULL;
 
     result = 0;
 
+    if (new_size > cf->alloc_size) {
 /* OSX mman does not implement mremap or MREMAP_MAYMOVE. */
 #ifndef MREMAP_MAYMOVE
-    result = cio_file_native_unmap(cf);
+        result = munmap(cf->map, cf->alloc_size);
+        if (result != 0) {
+            cio_file_native_report_os_error();
 
-    if (result == -1) {
-        return result;
-    }
+            return CIO_ERROR;
+        }
 
-    tmp = mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, cf->fd, 0);
+        tmp = mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, cf->fd, 0);
+
 #else
-    (void) result;
+        (void) result;
 
-    tmp = mremap(cf->map, cf->alloc_size, new_size, MREMAP_MAYMOVE);
+        tmp = mremap(cf->map, cf->alloc_size, new_size, MREMAP_MAYMOVE);
 #endif
 
-    if (tmp == MAP_FAILED) {
-        cio_file_native_report_os_error();
+        if (tmp == MAP_FAILED) {
+            cio_file_native_report_os_error();
 
-        return CIO_ERROR;
+            return CIO_ERROR;
+        }
+
+        cf->map = tmp;
+        cf->alloc_size = new_size;
     }
-
-    cf->map = tmp;
-    cf->alloc_size = new_size;
 
     return CIO_OK;
 }
