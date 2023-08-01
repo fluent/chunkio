@@ -105,6 +105,7 @@ include_directories(
   include
   deps/
   deps/monkey/include
+  ${PROJECT_BINARY_DIR}/include/
   )
 
 add_subdirectory(deps/crc32)
