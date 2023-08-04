@@ -72,6 +72,8 @@ struct cio_options {
 
 struct cio_ctx {
     int page_size;
+    int truncate;
+    int realloc_size_hint;
     struct cio_options options;
 
     void *processed_user;
@@ -113,6 +115,8 @@ int cio_qsort(struct cio_ctx *ctx, int (*compar)(const void *, const void *));
 void cio_set_log_callback(struct cio_ctx *ctx, void (*log_cb));
 int cio_set_log_level(struct cio_ctx *ctx, int level);
 int cio_set_max_chunks_up(struct cio_ctx *ctx, int n);
+int cio_set_realloc_size_hint(struct cio_ctx *ctx, size_t realloc_size_hint);
+int cio_set_truncate(struct cio_ctx *ctx, int truncate);
 
 int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size);
 int cio_meta_cmp(struct cio_chunk *ch, char *meta_buf, int meta_len);
