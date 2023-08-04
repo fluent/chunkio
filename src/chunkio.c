@@ -107,6 +107,8 @@ struct cio_ctx *cio_create(struct cio_options *options)
     ctx->page_size = cio_getpagesize();
     ctx->max_chunks_up = CIO_MAX_CHUNKS_UP;
     ctx->options.flags = options->flags;
+    ctx->truncate = CIO_TRUE;
+    ctx->realloc_size_hint = -1;
 
     if (options->user != NULL) {
         ctx->options.user = strdup(options->user);
@@ -303,5 +305,25 @@ int cio_set_max_chunks_up(struct cio_ctx *ctx, int n)
     }
 
     ctx->max_chunks_up = n;
+    return 0;
+}
+
+int cio_set_realloc_size_hint(struct cio_ctx *ctx, size_t realloc_size_hint)
+{
+    if (realloc_size_hint < cio_getpagesize() * 8) {
+        cio_log_error(ctx,
+                      "[chunkio] cannot specify less than %d bytes\n",
+                      cio_getpagesize() * 8);
+        return -1;
+    }
+
+    ctx->realloc_size_hint = realloc_size_hint;
+
+    return 0;
+}
+
+int cio_set_truncate(struct cio_ctx *ctx, int truncate)
+{
+    ctx->truncate = truncate;
     return 0;
 }
