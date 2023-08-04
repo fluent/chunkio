@@ -927,6 +927,9 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
     if (av_size < count) {
         pre_content = (CIO_FILE_HEADER_MIN + meta_len);
         new_size = cf->alloc_size + cf->realloc_size;
+        while (new_size < (pre_content + cf->data_size + count)) {
+            new_size += cf->realloc_size;
+        }
 
         new_size = ROUND_UP(new_size, ch->ctx->page_size);
         ret = cio_file_resize(cf, new_size);
