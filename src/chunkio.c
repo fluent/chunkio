@@ -80,6 +80,8 @@ struct cio_ctx *cio_create(struct cio_options *options)
     default_options.log_cb = NULL;
     default_options.log_level = CIO_LOG_INFO;
     default_options.flags = 0;
+    default_options.truncate = CIO_TRUE;
+    default_options.realloc_size_hint = -1;
 
     if (options == NULL) {
         options = &default_options;
@@ -171,6 +173,22 @@ struct cio_ctx *cio_create(struct cio_options *options)
     }
     else {
         ctx->processed_group = NULL;
+    }
+
+    /* optimization of file backend */
+    if (options->truncate != CIO_TRUE) {
+        ctx->truncate = CIO_FALSE;
+    }
+
+    if (options->realloc_size_hint > 0) {
+        ret = cio_set_realloc_size_hint(ctx, options->realloc_size_hint);
+        if (ret == -1) {
+            cio_log_error(ctx,
+                          "[chunkio] cannot initialize with realloc size hint %d\n",
+                          options->realloc_size_hint);
+            free(ctx);
+            return NULL;
+        }
     }
 
     return ctx;

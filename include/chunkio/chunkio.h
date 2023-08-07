@@ -68,6 +68,10 @@ struct cio_options {
     char *user;
     char *group;
     char *chmod;
+
+    /* chunk handlings */
+    int truncate;
+    int realloc_size_hint;
 };
 
 struct cio_ctx {
