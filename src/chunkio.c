@@ -177,6 +177,12 @@ struct cio_ctx *cio_create(struct cio_options *options)
 
     /* optimization of file backend */
     if (options->truncate != CIO_TRUE) {
+        if (options->flags & CIO_CHECKSUM) {
+            cio_log_error(ctx,
+                          "[chunkio] cannot initialize with using checksum and no truncations at the same time");
+            free(ctx);
+            return NULL;
+        }
         ctx->truncate = CIO_FALSE;
     }
 
