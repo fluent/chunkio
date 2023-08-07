@@ -81,7 +81,7 @@ struct cio_ctx *cio_create(struct cio_options *options)
     default_options.log_level = CIO_LOG_INFO;
     default_options.flags = 0;
     default_options.truncate = CIO_TRUE;
-    default_options.realloc_size_hint = -1;
+    default_options.realloc_size_hint = CIO_DISABLE_REALLOC_HINT;
 
     if (options == NULL) {
         options = &default_options;
@@ -110,7 +110,7 @@ struct cio_ctx *cio_create(struct cio_options *options)
     ctx->max_chunks_up = CIO_MAX_CHUNKS_UP;
     ctx->options.flags = options->flags;
     ctx->truncate = CIO_TRUE;
-    ctx->realloc_size_hint = -1;
+    ctx->realloc_size_hint = CIO_DISABLE_REALLOC_HINT;
 
     if (options->user != NULL) {
         ctx->options.user = strdup(options->user);
