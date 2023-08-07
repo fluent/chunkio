@@ -54,6 +54,7 @@
 
 /* defaults */
 #define CIO_MAX_CHUNKS_UP  64   /* default limit for cio_ctx->max_chunks_up */
+#define CIO_DISABLE_REALLOC_HINT -1 /* default value of size of realloc hint */
 
 struct cio_ctx;
 
