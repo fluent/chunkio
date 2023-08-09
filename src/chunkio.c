@@ -69,13 +69,15 @@ void cio_options_init(struct cio_options *options)
 {
     memset(options, 0, sizeof(struct cio_options));
 
+    options->initialized = CIO_INITIALIZED;
+
     options->root_path = NULL;
     options->user = NULL;
     options->group = NULL;
     options->chmod = NULL;
     options->log_cb = NULL;
     options->log_level = CIO_LOG_INFO;
-    options->flags = 0;
+    options->flags = CIO_OPEN_RW;
     options->truncate = CIO_TRUE;
     options->realloc_size_hint = CIO_DISABLE_REALLOC_HINT;
 }
@@ -90,7 +92,19 @@ struct cio_ctx *cio_create(struct cio_options *options)
         cio_options_init(&default_options);
         options = &default_options;
     }
+    else {
+        if (options->initialized != CIO_INITIALIZED) {
+            /* the caller 'must' call cio_options_init() or pass NULL before creating a context */
+            fprintf(stderr, "[cio] 'options' has not been initialized properly\n");
+            return NULL;
+        }
+    }
     
+    /* sanitize chunk open flags */
+    if (!(options->flags & CIO_OPEN_RW) && !(options->flags & CIO_OPEN_RD)) {
+        options->flags |= CIO_OPEN_RW;
+    }
+
     if (options->log_level < CIO_LOG_ERROR ||
         options->log_level > CIO_LOG_TRACE) {
         fprintf(stderr, "[cio] invalid log level, aborting\n");
