@@ -53,12 +53,16 @@
 
 
 /* defaults */
-#define CIO_MAX_CHUNKS_UP  64   /* default limit for cio_ctx->max_chunks_up */
-#define CIO_DISABLE_REALLOC_HINT -1 /* default value of size of realloc hint */
+#define CIO_MAX_CHUNKS_UP          64  /* default limit for cio_ctx->max_chunks_up */
+#define CIO_DISABLE_REALLOC_HINT   -1  /* default value of size of realloc hint */
+#define CIO_INITIALIZED          1337
 
 struct cio_ctx;
 
 struct cio_options {
+    /* this bool flag sets if the options has been initialized, that's a mandatory step */
+    int initialized;
+
     int flags;
     char *root_path;
 
