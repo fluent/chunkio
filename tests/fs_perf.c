@@ -140,7 +140,7 @@ static void perf_write_realloc_hint(int realloc_hint, int up_down_mod)
     free(in_data);
 }
 
-void test_perf_write_realloc_32()
+static void test_perf_write_realloc_32()
 {
     int realloc_hint = 32 * 1024;
     int up_down_mod = 0;
@@ -148,7 +148,7 @@ void test_perf_write_realloc_32()
     perf_write_realloc_hint(realloc_hint, up_down_mod);
 }
 
-void test_perf_write_realloc_128()
+static void test_perf_write_realloc_128()
 {
     int realloc_hint = 128 * 1024;
     int up_down_mod = 0;
@@ -156,7 +156,7 @@ void test_perf_write_realloc_128()
     perf_write_realloc_hint(realloc_hint, up_down_mod);
 }
 
-void test_perf_write_realloc_512()
+static void test_perf_write_realloc_512()
 {
     int realloc_hint = 512 * 1024;
     int up_down_mod = 0;
@@ -164,9 +164,43 @@ void test_perf_write_realloc_512()
     perf_write_realloc_hint(realloc_hint, up_down_mod);
 }
 
+static void test_write_up_down_500()
+{
+    int realloc_hint = 512 * 1024;
+    int up_down_mod = 500;
+
+    perf_write_realloc_hint(realloc_hint, up_down_mod);
+}
+
+static void test_write_up_down_1000()
+{
+    int realloc_hint = 512 * 1024;
+    int up_down_mod = 1000;
+
+    perf_write_realloc_hint(realloc_hint, up_down_mod);
+}
+
+static void test_write_up_down_10000()
+{
+    int realloc_hint = 512 * 1024;
+    int up_down_mod = 10000;
+
+    perf_write_realloc_hint(realloc_hint, up_down_mod);
+}
+
 TEST_LIST = {
-    {"write_realloc_32", test_perf_write_realloc_32},
+    /* write with different realloc size hints */
+    {"write_realloc_32" , test_perf_write_realloc_32},
     {"write_realloc_128", test_perf_write_realloc_128},
     {"write_realloc_512", test_perf_write_realloc_512},
+
+    /* 
+     * the tests performs (5000000 * 2) cio writes, the following tests uses realloc hint of 512k
+     * and force the chunks to go down/up every specific loop intervals.
+     */
+    {"write_up_down_500"  , test_write_up_down_500},
+    {"write_up_down_1000" , test_write_up_down_1000},
+    {"write_up_down_10000", test_write_up_down_10000},
+
     { 0 }
 };
