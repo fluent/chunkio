@@ -46,10 +46,8 @@ static void test_context()
 
     flags = CIO_CHECKSUM;
 
-    memset(&cio_opts, 0, sizeof(cio_opts));
-
+    cio_options_init(&cio_opts);
     cio_opts.flags = flags;
-    cio_opts.log_cb = NULL;
 
     /* Invalid path */
     cio_opts.root_path = "";
