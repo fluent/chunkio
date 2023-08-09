@@ -65,28 +65,32 @@ static int check_root_path(struct cio_ctx *ctx, const char *root_path)
     return access(root_path, W_OK);
 }
 
+void cio_options_init(struct cio_options *options)
+{
+    memset(options, 0, sizeof(struct cio_options));
+
+    options->root_path = NULL;
+    options->user = NULL;
+    options->group = NULL;
+    options->chmod = NULL;
+    options->log_cb = NULL;
+    options->log_level = CIO_LOG_INFO;
+    options->flags = 0;
+    options->truncate = CIO_TRUE;
+    options->realloc_size_hint = CIO_DISABLE_REALLOC_HINT;
+}
+
 struct cio_ctx *cio_create(struct cio_options *options)
 {
     int ret;
     struct cio_ctx *ctx;
     struct cio_options default_options;
 
-    memset(&default_options, 0, sizeof(default_options));
-
-    default_options.root_path = NULL;
-    default_options.user = NULL;
-    default_options.group = NULL;
-    default_options.chmod = NULL;
-    default_options.log_cb = NULL;
-    default_options.log_level = CIO_LOG_INFO;
-    default_options.flags = 0;
-    default_options.truncate = CIO_TRUE;
-    default_options.realloc_size_hint = CIO_DISABLE_REALLOC_HINT;
-
     if (options == NULL) {
+        cio_options_init(&default_options);
         options = &default_options;
     }
-
+    
     if (options->log_level < CIO_LOG_ERROR ||
         options->log_level > CIO_LOG_TRACE) {
         fprintf(stderr, "[cio] invalid log level, aborting\n");
