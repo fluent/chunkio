@@ -111,7 +111,7 @@ struct cio_ctx {
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_chunk.h>
 
-
+void cio_options_init(struct cio_options *options);
 struct cio_ctx *cio_create(struct cio_options *options);
 void cio_destroy(struct cio_ctx *ctx);
 int cio_load(struct cio_ctx *ctx, char *chunk_extension);
