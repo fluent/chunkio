@@ -87,6 +87,18 @@ if(CIO_HAVE_FALLOCATE)
   CIO_DEFINITION(CIO_HAVE_FALLOCATE)
 endif()
 
+# posix_fallocate(2) support
+check_c_source_compiles("
+  #include <fcntl.h>
+  int main() {
+     posix_fallocate(0,0,0);
+     return 0;
+  }" CIO_HAVE_POSIX_FALLOCATE)
+
+if(CIO_HAVE_POSIX_FALLOCATE)
+  CIO_DEFINITION(CIO_HAVE_POSIX_FALLOCATE)
+endif()
+
 configure_file(
   "${PROJECT_SOURCE_DIR}/include/chunkio/cio_info.h.in"
   "${PROJECT_BINARY_DIR}/include/chunkio/cio_info.h"
