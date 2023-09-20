@@ -44,6 +44,7 @@
 #define CIO_CHECKSUM             4         /* enable checksum verification (crc32) */
 #define CIO_FULL_SYNC            8         /* force sync to fs through MAP_SYNC */
 #define CIO_DELETE_IRRECOVERABLE 16        /* delete irrecoverable chunks from disk */
+#define CIO_TRIM_FILES           32        /* trim files to their required size */
 
 /* Return status */
 #define CIO_CORRUPTED      -3         /* Indicate that a chunk is corrupted */
@@ -51,11 +52,18 @@
 #define CIO_ERROR          -1         /* Generic error */
 #define CIO_OK              0         /* OK */
 
+/* Configuration limits */
+/* The file minimum growth factor is 8 memory pages and
+ * the file maximum growth factor is 8 megabytes
+ */
+#define CIO_REALLOC_HINT_MIN            (cio_getpagesize() * 8)
+#define CIO_REALLOC_HINT_MAX            (8 * 1000 * 1000)
 
 /* defaults */
-#define CIO_MAX_CHUNKS_UP          64  /* default limit for cio_ctx->max_chunks_up */
-#define CIO_DISABLE_REALLOC_HINT   -1  /* default value of size of realloc hint */
-#define CIO_INITIALIZED          1337
+#define CIO_MAX_CHUNKS_UP               64  /* default limit for cio_ctx->max_chunks_up */
+#define CIO_DISABLE_REALLOC_HINT        -1  /* default value of size of realloc hint */
+#define CIO_DEFAULT_REALLOC_HINT        CIO_REALLOC_HINT_MIN
+#define CIO_INITIALIZED                 1337
 
 struct cio_ctx;
 
@@ -75,13 +83,11 @@ struct cio_options {
     char *chmod;
 
     /* chunk handlings */
-    int truncate;
     int realloc_size_hint;
 };
 
 struct cio_ctx {
     int page_size;
-    int truncate;
     int realloc_size_hint;
     struct cio_options options;
 
@@ -125,7 +131,9 @@ void cio_set_log_callback(struct cio_ctx *ctx, void (*log_cb));
 int cio_set_log_level(struct cio_ctx *ctx, int level);
 int cio_set_max_chunks_up(struct cio_ctx *ctx, int n);
 int cio_set_realloc_size_hint(struct cio_ctx *ctx, size_t realloc_size_hint);
-int cio_set_truncate(struct cio_ctx *ctx, int truncate);
+
+void cio_enable_file_trimming(struct cio_ctx *ctx);
+void cio_disable_file_trimming(struct cio_ctx *ctx);
 
 int cio_meta_write(struct cio_chunk *ch, char *buf, size_t size);
 int cio_meta_cmp(struct cio_chunk *ch, char *meta_buf, int meta_len);
