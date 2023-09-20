@@ -70,6 +70,10 @@ void cio_file_calculate_checksum(struct cio_file *cf, crc_t *out)
     ssize_t content_length;
     unsigned char *in_data;
 
+    if (cf->fs_size == 0) {
+        cio_file_update_size(cf);
+    }
+
     /* Metadata length header + metadata length + content length */
     len  = 2;
     len += cio_file_st_get_meta_len(cf->map);
@@ -272,7 +276,7 @@ static int cio_file_format_check(struct cio_chunk *ch,
             crc_check = htonl(crc_check);
 
             if (memcmp(p, &crc_check, sizeof(crc_check)) != 0) {
-                cio_log_debug(ch->ctx, "[cio file] invalid crc32 at %s/%s",
+                cio_log_info(ch->ctx, "[cio file] invalid crc32 at %s/%s",
                               ch->name, cf->path);
                 cio_error_set(ch, CIO_ERR_BAD_CHECKSUM);
 
