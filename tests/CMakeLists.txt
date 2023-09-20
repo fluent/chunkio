@@ -39,6 +39,7 @@ endforeach()
 # be executed manually
 set(UNIT_PERF_TESTS
   fs_perf.c
+  fs_fragmentation.c
   )
 foreach(source_file ${UNIT_PERF_TESTS})
   get_filename_component(source_file_we ${source_file} NAME_WE)
