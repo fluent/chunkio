@@ -861,9 +861,6 @@ static void truncate_file(struct cio_file *chunk_file,
                                  chunk_file->page_size);
     TEST_CHECK(result == CIO_OK);
 
-    result = cio_file_native_resize(chunk_file, new_file_size);
-    TEST_CHECK(result == 0);
-
     if (remove_content_length) {
         chunk_file->map[CIO_FILE_CONTENT_LENGTH_OFFSET + 0] = 0;
         chunk_file->map[CIO_FILE_CONTENT_LENGTH_OFFSET + 1] = 0;
@@ -873,6 +870,9 @@ static void truncate_file(struct cio_file *chunk_file,
 
     result = cio_file_native_unmap(chunk_file);
     TEST_CHECK(result == CIO_OK);
+
+    result = cio_file_native_resize(chunk_file, new_file_size);
+    TEST_CHECK(result == 0);
 
     result = cio_file_native_close(chunk_file);
     TEST_CHECK(result == CIO_OK);
