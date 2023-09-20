@@ -59,16 +59,6 @@ char cio_file_init_bytes[] =   {
 
 #define ROUND_UP(N, S) ((((N) + (S) - 1) / (S)) * (S))
 
-/* Get the number of bytes in the Content section */
-static size_t content_len(struct cio_file *cf)
-{
-    int meta;
-    size_t len;
-
-    meta = cio_file_st_get_meta_len(cf->map);
-    len = 2 + meta + cf->data_size;
-    return len;
-}
 
 /* Calculate content checksum in a variable */
 void cio_file_calculate_checksum(struct cio_file *cf, crc_t *out)
@@ -77,7 +67,11 @@ void cio_file_calculate_checksum(struct cio_file *cf, crc_t *out)
     size_t len;
     unsigned char *in_data;
 
-    len = content_len(cf);
+    /* Metadata length header + metadata length + content length */
+    len  = 2;
+    len += cio_file_st_get_meta_len(cf->map);
+    len += cio_file_st_get_content_len(cf->map, CIO_FILE_HEADER_MIN);
+
     in_data = (unsigned char *) cf->map + CIO_FILE_CONTENT_OFFSET;
     val = cio_crc32_update(cf->crc_cur, in_data, len);
     *out = val;
@@ -109,6 +103,7 @@ static void finalize_checksum(struct cio_file *cf)
 
     crc = cio_crc32_finalize(cf->crc_cur);
     crc = htonl(crc);
+
     memcpy(cf->map + 2, &crc, sizeof(crc));
 }
 
@@ -146,21 +141,26 @@ static void write_init_header(struct cio_chunk *ch, struct cio_file *cf)
         cf->map[4] = 0;
         cf->map[5] = 0;
     }
+
+    cio_file_st_set_content_len(cf->map, 0);
 }
 
 /* Return the available size in the file map to write data */
 static size_t get_available_size(struct cio_file *cf, int *meta_len)
 {
     size_t av;
-    int len;
+    int metadata_len;
 
     /* Get metadata length */
-    len = cio_file_st_get_meta_len(cf->map);
+    metadata_len = cio_file_st_get_meta_len(cf->map);
 
-    av = cf->alloc_size - cf->data_size;
-    av -= (CIO_FILE_HEADER_MIN + len);
+    av  = cf->alloc_size;
+    av -= CIO_FILE_HEADER_MIN;
+    av -= metadata_len;
+    av -= cf->data_size;
 
-    *meta_len = len;
+    *meta_len = metadata_len;
+
     return av;
 }
 
@@ -171,6 +171,9 @@ static size_t get_available_size(struct cio_file *cf, int *meta_len)
 static int cio_file_format_check(struct cio_chunk *ch,
                                  struct cio_file *cf, int flags)
 {
+    size_t metadata_length;
+    ssize_t content_length;
+    ssize_t logical_length;
     unsigned char *p;
     crc_t crc_check;
     crc_t crc;
@@ -186,6 +189,7 @@ static int cio_file_format_check(struct cio_chunk *ch,
             cio_log_warn(ch->ctx,
                          "[cio file] cannot initialize chunk (read-only)");
             cio_error_set(ch, CIO_ERR_PERMISSION);
+
             return -1;
         }
 
@@ -193,6 +197,7 @@ static int cio_file_format_check(struct cio_chunk *ch,
         if (cf->alloc_size < CIO_FILE_HEADER_MIN) {
             cio_log_warn(ch->ctx, "[cio file] cannot initialize chunk");
             cio_error_set(ch, CIO_ERR_BAD_LAYOUT);
+
             return -1;
         }
 
@@ -210,6 +215,31 @@ static int cio_file_format_check(struct cio_chunk *ch,
             cio_log_debug(ch->ctx, "[cio file] invalid header at %s",
                           ch->name);
             cio_error_set(ch, CIO_ERR_BAD_LAYOUT);
+
+            return -1;
+        }
+
+        /* Expected / logical file size verification */
+        content_length = cio_file_st_get_content_len(cf->map, cf->fs_size);
+        if (content_length == -1) {
+            cio_log_debug(ch->ctx, "[cio file] truncated header (%zu / %zu) %s",
+                          cf->fs_size, CIO_FILE_HEADER_MIN, ch->name);
+            cio_error_set(ch, CIO_ERR_BAD_FILE_SIZE);
+
+            return -1;
+        }
+
+        metadata_length = cio_file_st_get_meta_len(cf->map);
+
+        logical_length = CIO_FILE_HEADER_MIN +
+                         metadata_length +
+                         content_length;
+
+        if (logical_length > cf->fs_size) {
+            cio_log_debug(ch->ctx, "[cio file] truncated file (%zd / %zd) %s",
+                          cf->fs_size, logical_length, ch->name);
+            cio_error_set(ch, CIO_ERR_BAD_FILE_SIZE);
+
             return -1;
         }
 
@@ -227,12 +257,15 @@ static int cio_file_format_check(struct cio_chunk *ch,
             /* Compare */
             crc_check = cio_crc32_finalize(crc);
             crc_check = htonl(crc_check);
+
             if (memcmp(p, &crc_check, sizeof(crc_check)) != 0) {
                 cio_log_debug(ch->ctx, "[cio file] invalid crc32 at %s/%s",
                               ch->name, cf->path);
                 cio_error_set(ch, CIO_ERR_BAD_CHECKSUM);
+
                 return -1;
             }
+
             cf->crc_cur = crc;
         }
     }
@@ -368,7 +401,7 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
 
     /* check content data size */
     if (fs_size > 0) {
-        content_size = cio_file_st_get_content_size(cf->map, fs_size);
+        content_size = cio_file_st_get_content_len(cf->map, fs_size);
 
         if (content_size == -1) {
             cio_error_set(ch, CIO_ERR_BAD_FILE_SIZE);
@@ -382,6 +415,7 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
 
             return CIO_CORRUPTED;
         }
+
 
         cf->data_size = content_size;
         cf->fs_size = fs_size;
@@ -952,6 +986,14 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
                       old_size, new_size);
     }
 
+    /* If crc_reset was toggled we know that data_size was
+     * modified by cio_chunk_write_at which means we need
+     * to update the header before we recalculate the checksum
+     */
+    if (cf->crc_reset) {
+        cio_file_st_set_content_len(cf->map, cf->data_size);
+    }
+
     if (ch->ctx->options.flags & CIO_CHECKSUM) {
         update_checksum(cf, (unsigned char *) buf, count);
     }
@@ -961,6 +1003,8 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
 
     cf->data_size += count;
     cf->synced = CIO_FALSE;
+
+    cio_file_st_set_content_len(cf->map, cf->data_size);
 
     return 0;
 }
@@ -1075,7 +1119,11 @@ int cio_file_sync(struct cio_chunk *ch)
         return -1;
     }
 
-    if (ch->ctx->truncate == CIO_TRUE) {
+    /* File trimming has been made opt-in because it causes
+     * performance degradation and excessive fragmentation
+     * in XFS.
+     */
+    if ((ch->ctx->options.flags & CIO_TRIM_FILES) != 0) {
         /* If there are extra space, truncate the file size */
         av_size = get_available_size(cf, &meta_len);
 
@@ -1090,6 +1138,13 @@ int cio_file_sync(struct cio_chunk *ch)
         }
 
         if (desired_size != file_size) {
+            /* When file trimming is enabled we still round the file size up
+             * to the memory page size because even though not explicitly
+             * stated there seems to be a performance degradation issue that
+             * correlates with sub-page mapping.
+             */
+            desired_size = ROUND_UP(desired_size, ch->ctx->page_size);
+
             ret = cio_file_resize(cf, desired_size);
 
             if (ret != CIO_OK) {
