@@ -40,6 +40,8 @@
 #include <chunkio/cio_error.h>
 #include <chunkio/cio_utils.h>
 
+size_t scio_file_page_size = 0;
+
 char cio_file_init_bytes[] =   {
     /* file type (2 bytes)    */
     CIO_FILE_ID_00, CIO_FILE_ID_01,
@@ -65,12 +67,20 @@ void cio_file_calculate_checksum(struct cio_file *cf, crc_t *out)
 {
     crc_t val;
     size_t len;
+    ssize_t content_length;
     unsigned char *in_data;
 
     /* Metadata length header + metadata length + content length */
     len  = 2;
     len += cio_file_st_get_meta_len(cf->map);
-    len += cio_file_st_get_content_len(cf->map, CIO_FILE_HEADER_MIN);
+
+    content_length = cio_file_st_get_content_len(cf->map,
+                                                 cf->fs_size,
+                                                 cf->page_size);
+
+    if (content_length > 0) {
+        len += content_length;
+    }
 
     in_data = (unsigned char *) cf->map + CIO_FILE_CONTENT_OFFSET;
     val = cio_crc32_update(cf->crc_cur, in_data, len);
@@ -220,7 +230,10 @@ static int cio_file_format_check(struct cio_chunk *ch,
         }
 
         /* Expected / logical file size verification */
-        content_length = cio_file_st_get_content_len(cf->map, cf->fs_size);
+        content_length = cio_file_st_get_content_len(cf->map,
+                                                     cf->fs_size,
+                                                     cf->page_size);
+
         if (content_length == -1) {
             cio_log_debug(ch->ctx, "[cio file] truncated header (%zu / %zu) %s",
                           cf->fs_size, CIO_FILE_HEADER_MIN, ch->name);
@@ -401,7 +414,9 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
 
     /* check content data size */
     if (fs_size > 0) {
-        content_size = cio_file_st_get_content_len(cf->map, fs_size);
+        content_size = cio_file_st_get_content_len(cf->map,
+                                                   fs_size,
+                                                   cf->page_size);
 
         if (content_size == -1) {
             cio_error_set(ch, CIO_ERR_BAD_FILE_SIZE);
@@ -625,12 +640,15 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
 
     cf->fd = -1;
     cf->flags = flags;
+    cf->page_size = cio_getpagesize();
+
     if (ctx->realloc_size_hint > 0) {
         cf->realloc_size = ctx->realloc_size_hint;
     }
     else {
-        cf->realloc_size = cio_getpagesize() * 8;
+        cf->realloc_size = CIO_REALLOC_HINT_MIN;
     }
+
     cf->st_content = NULL;
     cf->crc_cur = cio_crc32_init();
     cf->path = path;
