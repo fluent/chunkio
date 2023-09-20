@@ -512,7 +512,7 @@ int cio_file_native_resize(struct cio_file *cf, size_t new_size)
      * fallocate() is not portable an Linux only. Since macOS does not have
      * fallocate() we use ftruncate().
      */
-    if (fallocate_available && new_size > cf->alloc_size) {
+    if (fallocate_available && new_size > cf->fs_size) {
         retry:
 
        if (cf->allocate_strategy == CIO_FILE_LINUX_FALLOCATE) {
