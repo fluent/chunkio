@@ -352,6 +352,8 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
         return CIO_OK;
     }
 
+    cf->taint_flag = CIO_FALSE;
+
     /*
      * 'size' value represents the value of a previous fstat(2) set by a previous
      * caller. If the value is greater than zero, just use it, otherwise do a new
