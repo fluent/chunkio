@@ -23,7 +23,6 @@
  */
 
 #include <Windows.h>
-#include <shlwapi.h>
 
 #include "dirent.h"
 
