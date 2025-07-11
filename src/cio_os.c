@@ -49,6 +49,45 @@ int cio_os_isdir(const char *dir)
     return -1;
 }
 
+#ifdef _WIN32
+inline int cio_os_win32_make_recursive_path(const char* path) {
+    char dir[MAX_PATH];
+    char* p = NULL;
+
+    if (_fullpath(dir, path, MAX_PATH) == NULL) {
+        return 1;
+    }
+
+    for (p = dir; *p; p++) {
+        /* Skip the drive letter (e.g., "C:") */
+        if (p > dir && *p == ':' && *(p - 1) != '\0') {
+            continue;
+        }
+
+        if (*p == '\\' || *p == '/') {
+            char original_char = *p;
+            *p = '\0';
+
+            if (!CreateDirectoryA(dir, NULL)) {
+                if (GetLastError() != ERROR_ALREADY_EXISTS) {
+                    *p = original_char;
+                    return 1;
+                }
+            }
+            *p = original_char;
+        }
+    }
+
+    if (!CreateDirectoryA(dir, NULL)) {
+        if (GetLastError() != ERROR_ALREADY_EXISTS) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+#endif
+
 /* Create directory */
 int cio_os_mkpath(const char *dir, mode_t mode)
 {
@@ -85,7 +124,7 @@ int cio_os_mkpath(const char *dir, mode_t mode)
         return 1;
     }
 
-    if (SHCreateDirectoryExA(NULL, path, NULL) != ERROR_SUCCESS) {
+    if (cio_os_win32_make_recursive_path(path) != ERROR_SUCCESS) {
         return 1;
     }
     return 0;
