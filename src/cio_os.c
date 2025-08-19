@@ -50,40 +50,68 @@ int cio_os_isdir(const char *dir)
 }
 
 #ifdef _WIN32
-inline int cio_os_win32_make_recursive_path(const char* path) {
-    char dir[MAX_PATH];
-    char* p = NULL;
+static int cio_os_win32_make_recursive_path(const char* path) {
+    char  dir[MAX_PATH];
+    char* p;
+    size_t len;
+    size_t root_len = 0;
+    size_t i = 0, seps = 0;
+    char saved;
 
     if (_fullpath(dir, path, MAX_PATH) == NULL) {
         return 1;
     }
 
+    /* Normalize to backslashes */
     for (p = dir; *p; p++) {
-        /* Skip the drive letter (e.g., "C:") */
-        if (p > dir && *p == ':' && *(p - 1) != '\0') {
-            continue;
+        if (*p == '/') {
+            *p = '\\';
         }
+    }
 
-        if (*p == '\\' || *p == '/') {
-            char original_char = *p;
+    len = strlen(dir);
+
+    /* Determine root length: "C:\" (3) or UNC root "\\server\share\" */
+    if (len >= 2 &&
+        ((dir[0] >= 'A' && dir[0] <= 'Z') || (dir[0] >= 'a' && dir[0] <= 'z')) &&
+        dir[1] == ':') {
+        root_len = (len >= 3 && dir[2] == '\\') ? 3 : 2;
+    }
+    else if (len >= 5 && dir[0] == '\\' && dir[1] == '\\') {
+        /* Skip server and share components: \\server\share\ */
+        i = 2;
+        while (i < len && seps < 2) {
+            if (dir[i] == '\\') {
+                seps++;
+            }
+            i++;
+        }
+        root_len = i; /* points just past "\\server\share\" */
+    }
+
+    /* Create each intermediate component after the root */
+    for (p = dir + root_len; *p; p++) {
+        if (*p == '\\') {
+            saved = *p;
             *p = '\0';
-
             if (!CreateDirectoryA(dir, NULL)) {
-                if (GetLastError() != ERROR_ALREADY_EXISTS) {
-                    *p = original_char;
+                DWORD err = GetLastError();
+                if (err != ERROR_ALREADY_EXISTS) {
+                    *p = saved;
                     return 1;
                 }
             }
-            *p = original_char;
+            *p = saved;
         }
     }
 
+    /* Create the final directory */
     if (!CreateDirectoryA(dir, NULL)) {
-        if (GetLastError() != ERROR_ALREADY_EXISTS) {
+        DWORD err = GetLastError();
+        if (err != ERROR_ALREADY_EXISTS) {
             return 1;
         }
     }
-
     return 0;
 }
 #endif
