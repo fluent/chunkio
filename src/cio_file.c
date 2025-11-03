@@ -801,9 +801,9 @@ static int _cio_file_up(struct cio_chunk *ch, int enforced)
         return CIO_ERROR;
     }
 
-    if (cf->fd > 0) {
+    if (cio_file_native_is_open(cf)) {
         cio_log_error(ch->ctx, "[cio file] file descriptor already exists: "
-                      "[fd=%i] %s:%s", cf->fd, ch->st->name, ch->name);
+                      "%s:%s", ch->st->name, ch->name);
         return CIO_ERROR;
     }
 
