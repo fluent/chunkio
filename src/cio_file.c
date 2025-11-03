@@ -1047,7 +1047,6 @@ int cio_file_write_metadata(struct cio_chunk *ch, char *buf, size_t size)
     char *cur_content_data;
     char *new_content_data;
     size_t new_size;
-    size_t content_av;
     size_t meta_av;
     struct cio_file *cf;
 
@@ -1082,13 +1081,10 @@ int cio_file_write_metadata(struct cio_chunk *ch, char *buf, size_t size)
      * where we need to increase the memory map size, move the content area
      * bytes to a different position and write the metadata.
      *
-     * Calculate the available space after the new metadata position.
-     * We need: header + new_metadata + content_data <= alloc_size
+     * Check if resize is needed before calculating content_av to avoid
+     * unsigned underflow. We need: header + new_metadata + content_data <= alloc_size
      */
-    content_av = cf->alloc_size - CIO_FILE_HEADER_MIN - size;
-
-    /* If there is no enough space for content data, increase the file size and it memory map */
-    if (content_av < cf->data_size) {
+    if (cf->alloc_size < CIO_FILE_HEADER_MIN + size + cf->data_size) {
         new_size = CIO_FILE_HEADER_MIN + size + cf->data_size;
 
         ret = cio_file_resize(cf, new_size);
