@@ -13,6 +13,14 @@ if(CIO_BACKEND_FILESYSTEM)
     )
 endif()
 
+# Windows-specific inconsistency tests
+if(WIN32 AND CIO_BACKEND_FILESYSTEM)
+  set(UNIT_TESTS_FILES
+    ${UNIT_TESTS_FILES}
+    fs_windows.c
+    )
+endif()
+
 set(CIO_TESTS_DATA_PATH ${CMAKE_CURRENT_SOURCE_DIR}/)
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/cio_tests_internal.h.in"
