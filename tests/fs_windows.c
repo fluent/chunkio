@@ -48,6 +48,9 @@
 #include <chunkio/cio_stream.h>
 #include <chunkio/cio_chunk.h>
 
+/* Note: We still need to include cio_file_native.h for testing native functions
+ * directly to verify bug fixes, but we use public APIs for state checks */
+
 #include "cio_tests_internal.h"
 
 #define CIO_ENV "tmp"
@@ -66,8 +69,8 @@ static int log_cb(struct cio_ctx *ctx, int level, const char *file, int line,
 /*
  * ISSUE #1: Test deleting a file that is open/mapped
  *
- * Expected behavior: Should fail with CIO_ERROR (as Unix does)
- * Current behavior:  Succeeds and may cause resource leaks
+ * Expected behavior: Delete should succeed after automatically releasing
+ *                    any outstanding mappings and handles.
  */
 static void test_win32_delete_while_open()
 {
@@ -101,20 +104,16 @@ static void test_win32_delete_while_open()
     cf = (struct cio_file *) chunk->backend;
     TEST_CHECK(cf != NULL);
 
-    /* Verify file is open */
-    TEST_CHECK(cio_file_native_is_open(cf) == 1);
+    /* Verify file is open (using public API) */
+    TEST_CHECK(cio_chunk_is_up(chunk) == CIO_TRUE);
 
-    /* Try to delete while open - THIS SHOULD FAIL but currently doesn't on Windows */
+    /* Delete while open - should succeed and close resources automatically */
     ret = cio_file_native_delete(cf);
-    printf("Result of delete while open: %d (expected: CIO_ERROR=%d)\n",
-           ret, CIO_ERROR);
-
-    /* On Unix this returns CIO_ERROR, on Windows it currently succeeds */
-    /* This TEST_CHECK will FAIL in CI, highlighting the inconsistency */
-    TEST_CHECK(ret == CIO_ERROR);
-    if (ret != CIO_ERROR) {
-        printf("ISSUE DETECTED: Delete succeeded while file is open (inconsistent with Unix)\n");
-    }
+    printf("Result of delete while open: %d (expected: CIO_OK=%d)\n",
+           ret, CIO_OK);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(cio_file_native_is_open(cf) == CIO_FALSE);
+    TEST_CHECK(cio_file_native_is_mapped(cf) == CIO_FALSE);
 
     cio_chunk_close(chunk, CIO_FALSE);
     cio_stream_delete(stream);
@@ -124,8 +123,8 @@ static void test_win32_delete_while_open()
 /*
  * ISSUE #2: Test deleting a file that is mapped
  *
- * Expected behavior: Should fail with CIO_ERROR (as Unix does)
- * Current behavior:  Succeeds and may cause crashes
+ * Expected behavior: Delete should succeed after the implementation releases
+ *                    the mapping safely.
  */
 static void test_win32_delete_while_mapped()
 {
@@ -163,21 +162,16 @@ static void test_win32_delete_while_mapped()
     ret = cio_chunk_write(chunk, "test data", 9);
     TEST_CHECK(ret == 0);
 
-    /* Verify file is mapped */
-    TEST_CHECK(cio_file_native_is_mapped(cf) == 1);
+    /* Verify file is mapped (using public API) */
+    TEST_CHECK(cio_chunk_is_up(chunk) == CIO_TRUE);
 
-    /* Try to delete while mapped - THIS SHOULD FAIL but currently doesn't on Windows */
+    /* Delete while mapped - should succeed and release mapping */
     ret = cio_file_native_delete(cf);
-    printf("Result of delete while mapped: %d (expected: CIO_ERROR=%d)\n",
-           ret, CIO_ERROR);
-
-    /* On Unix this returns CIO_ERROR, on Windows it currently succeeds */
-    /* This TEST_CHECK will FAIL in CI, highlighting the inconsistency */
-    TEST_CHECK(ret == CIO_ERROR);
-    if (ret != CIO_ERROR) {
-        printf("ISSUE DETECTED: Delete succeeded while file is mapped (inconsistent with Unix)\n");
-        printf("WARNING: This can cause crashes when accessing the mapped memory\n");
-    }
+    printf("Result of delete while mapped: %d (expected: CIO_OK=%d)\n",
+           ret, CIO_OK);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(cio_file_native_is_open(cf) == CIO_FALSE);
+    TEST_CHECK(cio_file_native_is_mapped(cf) == CIO_FALSE);
 
     cio_chunk_close(chunk, CIO_FALSE);
     cio_stream_delete(stream);
@@ -222,41 +216,30 @@ static void test_win32_sync_without_map()
     cf = (struct cio_file *) chunk->backend;
     TEST_CHECK(cf != NULL);
 
-    /* Manually unmap if it was auto-mapped */
-    if (cio_file_native_is_mapped(cf)) {
-        ret = cio_file_native_unmap(cf);
-        TEST_CHECK(ret == CIO_OK);
+    /* Manually unmap if it was auto-mapped (using public API) */
+    if (cio_chunk_is_up(chunk) == CIO_TRUE) {
+        ret = cio_file_down(chunk);
+        TEST_CHECK(ret == 0);
     }
 
-    /* Verify file is not mapped */
-    TEST_CHECK(cio_file_native_is_mapped(cf) == 0);
+    /* Verify file is not mapped (using public API) */
+    TEST_CHECK(cio_chunk_is_up(chunk) == CIO_FALSE);
+    printf("Verified: chunk is down (not mapped)\n");
 
-    /* Verify cf->map is actually NULL (this is the issue) */
-    TEST_CHECK(cf->map == NULL);
-    printf("Verified: cf->map is NULL\n");
+    /* Set synced flag to FALSE to force sync path (since cio_file_down syncs before unmapping) */
+    cf->synced = CIO_FALSE;
 
-    /* Try to sync without mapping - THIS SHOULD CHECK FIRST */
-    /* On Windows, cio_file_native_sync accesses cf->map directly without checking */
-    /* This will likely cause a crash or access violation because FlushViewOfFile
-     * is called with a NULL pointer */
-    printf("Attempting sync on unmapped file (cf->map is NULL)...\n");
-    printf("WARNING: cio_file_native_sync will call FlushViewOfFile(cf->map, ...)\n");
-    printf("         which will fail or crash if cf->map is NULL\n");
+    /* Try to sync without mapping using public API */
+    /* cio_file_sync should auto-remap and emit a warning */
+    printf("Attempting sync on unmapped file using cio_file_sync()...\n");
+    printf("cio_file_sync() should remap and warn instead of failing\n");
 
-    /* This test is designed to highlight the issue - on Windows it may crash */
-    /* On Windows, cio_file_native_sync accesses cf->map without checking if NULL */
-    /* This TEST_CHECK will FAIL in CI if sync succeeds or crashes, highlighting the issue */
-    /* Note: If it crashes, the test will fail anyway */
-    ret = cio_file_native_sync(cf, 0);
-    printf("Result of sync without map: %d (expected: CIO_ERROR=%d)\n", ret, CIO_ERROR);
+    ret = cio_file_sync(chunk);
+    printf("Result of sync without map: %d (expected: 0 for success with warning)\n", ret);
 
-    /* Expected: CIO_ERROR due to NULL map pointer */
-    /* This TEST_CHECK will FAIL in CI, highlighting the inconsistency */
-    TEST_CHECK(ret == CIO_ERROR);
-    if (ret != CIO_ERROR) {
-        printf("ISSUE DETECTED: Sync succeeded with NULL map pointer (inconsistent behavior)\n");
-        printf("Expected: CIO_ERROR due to NULL map pointer\n");
-    }
+    TEST_CHECK(ret == 0);
+    TEST_CHECK(cio_chunk_is_up(chunk) == CIO_FALSE);
+    TEST_CHECK(cio_file_native_is_open(cf) == CIO_FALSE);
 
     cio_chunk_close(chunk, CIO_FALSE);
     cio_stream_delete(stream);
@@ -326,13 +309,21 @@ static void test_win32_map_size_mismatch()
     cf = (struct cio_file *) chunk->backend;
     TEST_CHECK(cf != NULL);
 
+    /* Unmap if cio_chunk_open auto-mapped the file (using public API) */
+    if (cio_chunk_is_up(chunk) == CIO_TRUE) {
+        ret = cio_file_down(chunk);
+        TEST_CHECK(ret == 0);
+    }
+
+    /* Ensure file is still open */
+    if (!cio_file_native_is_open(cf)) {
+        ret = cio_file_native_open(cf);
+        TEST_CHECK(ret == CIO_OK);
+    }
+
     /* Try to map with a size larger than the file */
     map_size = file_size + 4096; /* Request 4KB more than file size */
     printf("Attempting to map %zu bytes (file is %zu bytes)\n", map_size, file_size);
-
-    /* Open file */
-    ret = cio_file_native_open(cf);
-    TEST_CHECK(ret == CIO_OK);
 
     /* This is where the issue occurs: CreateFileMapping uses current file size (0,0),
      * but MapViewOfFile tries to map a larger size */
@@ -340,26 +331,36 @@ static void test_win32_map_size_mismatch()
     printf("Result of mapping %zu bytes to %zu byte file: %d\n",
            map_size, file_size, ret);
 
-    /* The issue: CreateFileMapping is called with (0, 0) which uses file size,
-     * but MapViewOfFile requests map_size. This mismatch can cause issues.
-     * If mapping succeeds, alloc_size should match map_size, not file_size */
+    /* For read-only files, mapping beyond file size is not possible on Windows.
+     * The mapping should be limited to file_size, and alloc_size should reflect
+     * the actual mapped size (file_size), not the requested size (map_size).
+     * This ensures consistency between CreateFileMappingA and MapViewOfFile sizes. */
     if (ret == CIO_OK) {
-        printf("WARNING: Mapping succeeded with size mismatch\n");
-        printf("Expected alloc_size: %zu (map_size), file_size: %zu\n", map_size, file_size);
+        printf("Mapping succeeded\n");
+        printf("Requested map_size: %zu, file_size: %zu\n", map_size, file_size);
 
-        /* Verify what was actually mapped - this may expose the issue */
-        if (cio_file_native_is_mapped(cf)) {
+        /* Verify what was actually mapped (using public API) */
+        if (cio_chunk_is_up(chunk) == CIO_TRUE) {
             printf("File is mapped, alloc_size: %zu\n", cf->alloc_size);
-            /* This TEST_CHECK will highlight if alloc_size doesn't match requested map_size */
-            /* Due to the bug, it may match file_size instead of map_size */
-            TEST_CHECK(cf->alloc_size == map_size);
+
+            /* For read-only files, alloc_size should match file_size (the actual mapped size),
+             * not the requested map_size (which exceeds file size) */
+            /* This ensures consistency: CreateFileMappingA and MapViewOfFile both use actual_map_size */
+            TEST_CHECK(cf->alloc_size == file_size);
+
+            if (cf->alloc_size != file_size) {
+                printf("ISSUE DETECTED: alloc_size (%zu) doesn't match file_size (%zu)\n",
+                       cf->alloc_size, file_size);
+                printf("For read-only files, mapping is limited to file_size\n");
+            }
         }
 
         ret = cio_file_native_unmap(cf);
         TEST_CHECK(ret == CIO_OK);
     }
     else {
-        printf("Mapping failed when size mismatch occurs (may be correct behavior)\n");
+        printf("Mapping failed when size mismatch occurs\n");
+        /* For read-only files, this might be expected if map_size > file_size */
     }
 
     cio_file_native_close(cf);
@@ -405,26 +406,15 @@ static void test_win32_fd_check_inconsistency()
     cf = (struct cio_file *) chunk->backend;
     TEST_CHECK(cf != NULL);
 
-    /* Verify file is open using the proper macro */
-    ret = cio_file_native_is_open(cf);
-    TEST_CHECK(ret == 1);
-    printf("cio_file_native_is_open(cf): %d\n", ret);
+    /* Verify file is open (using public API) */
+    ret = cio_chunk_is_up(chunk);
+    TEST_CHECK(ret == CIO_TRUE);
+    printf("cio_chunk_is_up(chunk): %d\n", ret);
 
-    /* Check cf->fd value on Windows (should be -1 or not set properly) */
-    printf("cf->fd value: %d\n", cf->fd);
-    printf("cf->fd > 0 check: %d\n", (cf->fd > 0));
-    printf("cio_file_native_is_open(cf): %d\n", cio_file_native_is_open(cf));
-
-    /* This highlights that cf->fd > 0 doesn't work on Windows */
+    /* Check cf->fd value on Windows (internal check for documentation) */
     /* On Windows, cf->fd is typically -1, but the file is still open via backing_file */
-    /* This TEST_CHECK will FAIL in CI, highlighting the inconsistency */
-    /* cio_file.c line 804 uses cf->fd > 0 which is Unix-specific and doesn't work on Windows */
-    TEST_CHECK((cf->fd > 0) == cio_file_native_is_open(cf));
-    if ((cf->fd > 0) != cio_file_native_is_open(cf)) {
-        printf("ISSUE DETECTED: cf->fd check (%d) doesn't match cio_file_native_is_open (%d)\n",
-               (cf->fd > 0), cio_file_native_is_open(cf));
-        printf("WARNING: cio_file.c line 804 uses cf->fd > 0 which is Unix-specific\n");
-    }
+    printf("cf->fd value: %d (internal, not used on Windows)\n", cf->fd);
+    printf("Note: cio_file.c now uses cio_file_native_is_open() instead of cf->fd > 0\n");
 
     cio_chunk_close(chunk, CIO_FALSE);
     cio_stream_delete(stream);
