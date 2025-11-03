@@ -324,7 +324,10 @@ static int munmap_file(struct cio_ctx *ctx, struct cio_chunk *ch)
     }
 
     /* Unmap file */
-    cio_file_native_unmap(cf);
+    ret = cio_file_native_unmap(cf);
+    if (ret != CIO_OK) {
+        return -1;
+    }
 
     cf->data_size = 0;
     cf->alloc_size = 0;
@@ -343,6 +346,7 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
 {
     ssize_t          content_size;
     size_t           fs_size;
+    size_t           requested_map_size;
     int              ret;
     struct cio_file *cf;
 
@@ -413,12 +417,28 @@ static int mmap_file(struct cio_ctx *ctx, struct cio_chunk *ch, size_t size)
     cf->alloc_size = size;
 
     /* Map the file */
+    requested_map_size = cf->alloc_size;
     ret = cio_file_native_map(cf, cf->alloc_size);
 
     if (ret != CIO_OK) {
         cio_log_error(ctx, "cannot mmap/read chunk '%s'", cf->path);
 
         return CIO_ERROR;
+    }
+
+    if ((cf->flags & CIO_OPEN_RD) && requested_map_size != cf->alloc_size) {
+        if (cf->map_truncated_warned == CIO_FALSE) {
+            cio_log_warn(ctx,
+                         "[cio file] truncated read-only map from %zu to %zu bytes: %s/%s",
+                         requested_map_size,
+                         cf->alloc_size,
+                         ch->st->name,
+                         ch->name);
+            cf->map_truncated_warned = CIO_TRUE;
+        }
+    }
+    else {
+        cf->map_truncated_warned = CIO_FALSE;
     }
 
     /* check content data size */
@@ -664,6 +684,9 @@ struct cio_file *cio_file_open(struct cio_ctx *ctx,
     cf->crc_cur = cio_crc32_init();
     cf->path = path;
     cf->map = NULL;
+    cf->ctx = ctx;
+    cf->auto_remap_warned = CIO_FALSE;
+    cf->map_truncated_warned = CIO_FALSE;
     ch->backend = cf;
 
 #ifdef _WIN32
@@ -908,7 +931,11 @@ int cio_file_down(struct cio_chunk *ch)
     }
 
     /* unmap memory */
-    munmap_file(ch->ctx, ch);
+    ret = munmap_file(ch->ctx, ch);
+
+    if (ret != 0) {
+        return -1;
+    }
 
     /* Allocated map size is zero */
     cf->alloc_size = 0;
@@ -921,7 +948,12 @@ int cio_file_down(struct cio_chunk *ch)
     }
 
     /* Close file descriptor */
-    cio_file_native_close(cf);
+    ret = cio_file_native_close(cf);
+
+    if (ret != CIO_OK) {
+        cio_errno();
+        return -1;
+    }
 
     return 0;
 }
@@ -1132,6 +1164,12 @@ int cio_file_sync(struct cio_chunk *ch)
     }
 
     if (cf->flags & CIO_OPEN_RD) {
+        return 0;
+    }
+
+    /* If chunk is down (unmapped), there's nothing to sync */
+    /* You can only write to a chunk when it's up, so if it's down, no pending changes exist */
+    if (!cio_file_native_is_mapped(cf)) {
         return 0;
     }
 
