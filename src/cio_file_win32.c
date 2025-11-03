@@ -92,9 +92,13 @@ int cio_file_native_map(struct cio_file *cf, size_t map_size)
         return CIO_ERROR;
     }
 
+    /* CreateFileMappingA requires size as two DWORDs (high and low) */
+    /* Passing (0, 0) uses current file size, but we want map_size */
     cf->backing_mapping = CreateFileMappingA(cf->backing_file, NULL,
                                              desired_protection,
-                                             0, 0, NULL);
+                                             (DWORD)(map_size >> 32),
+                                             (DWORD)(map_size & 0xFFFFFFFFUL),
+                                             NULL);
 
     if (cf->backing_mapping == NULL) {
         cio_file_native_report_os_error();
@@ -474,6 +478,11 @@ int cio_file_native_delete(struct cio_file *cf)
 {
     int result;
 
+    if (cio_file_native_is_open(cf) ||
+        cio_file_native_is_mapped(cf)) {
+        return CIO_ERROR;
+    }
+
     result = DeleteFileA(cf->path);
 
     if (result == 0) {
@@ -488,6 +497,10 @@ int cio_file_native_delete(struct cio_file *cf)
 int cio_file_native_sync(struct cio_file *cf, int sync_mode)
 {
     int result;
+
+    if (!cio_file_native_is_mapped(cf)) {
+        return CIO_ERROR;
+    }
 
     result = FlushViewOfFile(cf->map, cf->alloc_size);
 
