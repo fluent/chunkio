@@ -124,6 +124,45 @@ static void finalize_checksum(struct cio_file *cf)
     memcpy(cf->map + 2, &crc, sizeof(crc));
 }
 
+static int recover_unfinalized_checksum(struct cio_chunk *ch,
+                                        struct cio_file *cf,
+                                        unsigned char *hash,
+                                        crc_t crc)
+{
+    int ret;
+
+    if (memcmp(hash, &crc, sizeof(crc)) != 0) {
+        return CIO_FALSE;
+    }
+
+    cf->crc_cur = crc;
+
+    if (!(cf->flags & CIO_OPEN_RW)) {
+        cio_log_info(ch->ctx,
+                     "[cio file] accepted unfinalized crc32 at %s/%s (read-only)",
+                     ch->name, cf->path);
+
+        return CIO_TRUE;
+    }
+
+    finalize_checksum(cf);
+    cf->synced = CIO_FALSE;
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    if (ret == CIO_OK) {
+        cf->synced = CIO_TRUE;
+        cio_log_info(ch->ctx, "[cio file] recovered unfinalized crc32 at %s/%s",
+                     ch->name, cf->path);
+    }
+    else {
+        cio_log_warn(ch->ctx,
+                     "[cio file] could not persist recovered crc32 at %s/%s",
+                     ch->name, cf->path);
+    }
+
+    return CIO_TRUE;
+}
+
 /*
  * adjust_layout: if metadata has changed, we need to adjust the content
  * data and reference pointers.
@@ -188,6 +227,7 @@ static size_t get_available_size(struct cio_file *cf, int *meta_len)
 static int cio_file_format_check(struct cio_chunk *ch,
                                  struct cio_file *cf, int flags)
 {
+    int ret;
     size_t metadata_length;
     ssize_t content_length;
     ssize_t logical_length;
@@ -280,11 +320,14 @@ static int cio_file_format_check(struct cio_chunk *ch,
             crc_check = htonl(crc_check);
 
             if (memcmp(p, &crc_check, sizeof(crc_check)) != 0) {
-                cio_log_info(ch->ctx, "[cio file] invalid crc32 at %s/%s",
-                              ch->name, cf->path);
-                cio_error_set(ch, CIO_ERR_BAD_CHECKSUM);
+                ret = recover_unfinalized_checksum(ch, cf, p, crc);
+                if (ret == CIO_FALSE) {
+                    cio_log_info(ch->ctx, "[cio file] invalid crc32 at %s/%s",
+                                  ch->name, cf->path);
+                    cio_error_set(ch, CIO_ERR_BAD_CHECKSUM);
 
-                return -1;
+                    return -1;
+                }
             }
 
             cf->crc_cur = crc;

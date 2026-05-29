@@ -724,6 +724,77 @@ void test_issue_write_at()
     cio_destroy(ctx);
 }
 
+static void test_fs_recover_unfinalized_checksum()
+{
+    int ret;
+    int err;
+    char *hash;
+    char *out_buf;
+    size_t out_size;
+    crc_t crc_unfinalized;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "recoverable checksum payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_recover_crc", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cf = (struct cio_file *) chunk->backend;
+    crc_unfinalized = cf->crc_cur;
+    hash = cio_file_hash(cf);
+    memcpy(hash, &crc_unfinalized, sizeof(crc_unfinalized));
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(line));
+    TEST_CHECK(memcmp(out_buf, line, out_size) == 0);
+    free(out_buf);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cio_destroy(ctx);
+}
+
 
 void test_fs_up_down_up_append()
 {
@@ -1111,6 +1182,7 @@ TEST_LIST = {
     {"issue_51",   test_issue_51},
     {"issue_flb_2025", test_issue_flb_2025},
     {"issue_write_at", test_issue_write_at},
+    {"fs_recover_unfinalized_checksum", test_fs_recover_unfinalized_checksum},
     {"fs_up_down_up_append", test_fs_up_down_up_append},
     {"fs_deep_hierachy", test_deep_hierarchy},
     {"legacy_success", test_legacy_success},
