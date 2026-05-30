@@ -21,6 +21,7 @@
 #include <sys/mman.h>
 #include <arpa/inet.h>
 #endif
+#include <stdio.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -876,6 +877,109 @@ static void test_fs_shadow_checksum_recovers_primary_header()
     cio_destroy(ctx);
 }
 
+static void test_fs_shadow_checksum_recovers_read_only()
+{
+    int ret;
+    int err;
+    FILE *fp;
+    char *hash;
+    char *out_buf;
+    size_t out_size;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    unsigned char corrupted_hash[4];
+    unsigned char stored_hash[4];
+    char path[1024];
+    char line[] = "read-only shadow checksum payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_shadow_read_only", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cf = (struct cio_file *) chunk->backend;
+    hash = cio_file_hash(cf);
+    hash[0] ^= 0xff;
+    memcpy(corrupted_hash, hash, sizeof(corrupted_hash));
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    TEST_CHECK(ret == CIO_OK);
+
+    snprintf(path, sizeof(path), "%s/%s/%s", CIO_ENV,
+             "test_shadow_read_only", "test");
+
+    cio_destroy(ctx);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_OPEN_RD | CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_shadow_read_only", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN_RD, 0, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(line));
+    TEST_CHECK(memcmp(out_buf, line, out_size) == 0);
+    free(out_buf);
+
+    cio_destroy(ctx);
+
+    fp = fopen(path, "rb+");
+    TEST_CHECK(fp != NULL);
+    if (!fp) {
+        exit(1);
+    }
+
+    ret = fseek(fp, 2, SEEK_SET);
+    TEST_CHECK(ret == 0);
+
+    ret = fread(stored_hash, 1, sizeof(stored_hash), fp);
+    TEST_CHECK(ret == sizeof(stored_hash));
+
+    ret = fclose(fp);
+    TEST_CHECK(ret == 0);
+
+    TEST_CHECK(memcmp(stored_hash, corrupted_hash, sizeof(stored_hash)) == 0);
+}
+
 static void test_fs_shadow_checksum_recovers_primary_length()
 {
     int ret;
@@ -1588,6 +1692,7 @@ TEST_LIST = {
     {"issue_write_at", test_issue_write_at},
     {"fs_recover_unfinalized_checksum", test_fs_recover_unfinalized_checksum},
     {"fs_shadow_checksum_recovers_primary_header", test_fs_shadow_checksum_recovers_primary_header},
+    {"fs_shadow_checksum_recovers_read_only", test_fs_shadow_checksum_recovers_read_only},
     {"fs_shadow_checksum_recovers_primary_length", test_fs_shadow_checksum_recovers_primary_length},
     {"fs_shadow_checksum_recovers_stale_primary", test_fs_shadow_checksum_recovers_stale_primary},
     {"fs_write_at_zero_truncates_synced_checksum", test_fs_write_at_zero_truncates_synced_checksum},
