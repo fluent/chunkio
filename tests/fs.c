@@ -36,6 +36,7 @@
 #include <chunkio/cio_utils.h>
 #include <chunkio/cio_error.h>
 #include <chunkio/cio_file_native.h>
+#include <chunkio/cio_crc32.h>
 
 #include "cio_tests_internal.h"
 
@@ -63,6 +64,18 @@ static void set_test_header_u32(char *map, int offset, uint32_t value)
     buffer[1] = (uint8_t) ((value & 0x00FF0000) >> 16);
     buffer[2] = (uint8_t) ((value & 0x0000FF00) >>  8);
     buffer[3] = (uint8_t) ((value & 0x000000FF) >>  0);
+}
+
+static uint32_t get_test_header_u32(char *map, int offset)
+{
+    uint8_t *buffer;
+
+    buffer = (uint8_t *) &map[offset];
+
+    return (((uint32_t) buffer[0]) << 24) |
+           (((uint32_t) buffer[1]) << 16) |
+           (((uint32_t) buffer[2]) <<  8) |
+           (((uint32_t) buffer[3]) <<  0);
 }
 
 static struct cio_chunk *find_stream_chunk(struct cio_stream *stream,
@@ -756,6 +769,7 @@ void test_issue_write_at()
     cf = (struct cio_file *) chunk->backend;
     TEST_CHECK(cf->map == NULL);
     TEST_CHECK(cf->fd <= 0);
+
     cio_destroy(ctx);
 }
 
@@ -804,7 +818,14 @@ static void test_fs_recover_unfinalized_checksum()
     cf = (struct cio_file *) chunk->backend;
     crc_unfinalized = cf->crc_cur;
     hash = cio_file_hash(cf);
-    memcpy(hash, &crc_unfinalized, 4);
+    /*
+     * Reproduce the legacy on-disk layout exactly: the old writer stored the
+     * non finalized crc with memcpy(map + 2, &crc, sizeof(crc)). Using the full
+     * native width here means this test exercises the correct bytes on both
+     * little- and big-endian targets (on big-endian 64-bit the significant
+     * bytes land at offset 6..9, not 2..5).
+     */
+    memcpy(hash, &crc_unfinalized, sizeof(crc_unfinalized));
 
     ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
     TEST_CHECK(ret == CIO_OK);
@@ -1314,6 +1335,826 @@ static void test_fs_legacy_checksum_without_shadow_header()
     free(out_buf);
 
     cio_destroy(ctx);
+}
+
+/*
+ * Forward compatibility: a chunk written in the legacy on-disk format (no shadow
+ * tuple, primary CRC + content length only) must be loaded correctly by the
+ * current code after a full restart (fresh context + cio_load), and the legacy
+ * chunk must NOT be rewritten/decorated with a shadow tuple just by reading it.
+ */
+static void test_fs_old_format_loads_via_restart()
+{
+    int ret;
+    int err;
+    char *buf;
+    size_t buf_size;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "legacy on-disk chunk payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_OPEN | CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+    if (!ctx) {
+        exit(1);
+    }
+
+    stream = cio_stream_create(ctx, "test_old_format", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "chunk.0", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    /*
+     * Downgrade the header to the legacy layout: the primary CRC (bytes 2..5)
+     * and the content length (bytes 10..13) are already byte-identical to what
+     * old writers produced; the only legacy difference is the absence of the
+     * shadow tuple, so we zero bytes 14..21.
+     */
+    cf = (struct cio_file *) chunk->backend;
+    memset(cf->map + CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET, 0, 4);
+    memset(cf->map + CIO_FILE_SHADOW_HASH_OFFSET, 0, 4);
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cio_destroy(ctx);
+
+    /* Restart: a fresh context discovers the legacy chunk on disk */
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_OPEN | CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+    if (!ctx) {
+        exit(1);
+    }
+
+    ret = cio_load(ctx, NULL);
+    TEST_CHECK(ret == CIO_OK);
+
+    stream = cio_stream_get(ctx, "test_old_format");
+    TEST_CHECK(stream != NULL);
+    chunk = find_stream_chunk(stream, "chunk.0");
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    if (cio_chunk_is_up(chunk) == CIO_FALSE) {
+        ret = cio_chunk_up_force(chunk);
+        TEST_CHECK(ret == CIO_OK);
+    }
+
+    ret = cio_chunk_get_content(chunk, &buf, &buf_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(buf_size == strlen(line));
+    TEST_CHECK(memcmp(buf, line, strlen(line)) == 0);
+
+    /*
+     * Reading a valid legacy chunk must not have synthesized a shadow tuple:
+     * bytes 14..21 stay zero until the chunk is actually re-synced.
+     */
+    cf = (struct cio_file *) chunk->backend;
+    TEST_CHECK(get_test_header_u32(cf->map,
+                                   CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET) == 0);
+    TEST_CHECK(get_test_header_u32(cf->map, CIO_FILE_SHADOW_HASH_OFFSET) == 0);
+
+    cio_destroy(ctx);
+}
+
+/*
+ * Shadow recovery must reject a tuple whose content length does not fit in the
+ * file: a corrupted primary CRC combined with an oversized shadow length must
+ * surface as CIO_CORRUPTED, never a silent accept of out-of-bounds content.
+ */
+static void test_fs_shadow_rejects_oversized_length()
+{
+    int ret;
+    int err;
+    char *hash;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "shadow oversized payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_shadow_oversized", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    /* Corrupt the primary CRC so recovery must fall through to the shadow */
+    cf = (struct cio_file *) chunk->backend;
+    hash = cio_file_hash(cf);
+    hash[0] ^= 0xff;
+
+    /* Make the shadow content length larger than the file */
+    set_test_header_u32(cf->map, CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET,
+                        (uint32_t) (cf->fs_size + 4096));
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_CORRUPTED);
+    TEST_CHECK(cio_error_get(chunk) == CIO_ERR_BAD_CHECKSUM);
+
+    cf = (struct cio_file *) chunk->backend;
+    TEST_CHECK(cf->map == NULL);
+
+    cio_destroy(ctx);
+}
+
+/*
+ * Shadow recovery must not mask real content corruption: if a content byte is
+ * altered, neither the primary nor the shadow CRC validate against it and the
+ * chunk must be reported as corrupted.
+ */
+static void test_fs_shadow_rejects_corrupt_content()
+{
+    int ret;
+    int err;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "shadow corrupt content payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_shadow_corrupt", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    /*
+     * Flip the first content byte. Both the primary and the (still valid)
+     * shadow CRC were computed over the original content, so neither matches
+     * the altered data.
+     */
+    cf = (struct cio_file *) chunk->backend;
+    cf->map[CIO_FILE_HEADER_MIN] ^= 0xff;
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_CORRUPTED);
+    TEST_CHECK(cio_error_get(chunk) == CIO_ERR_BAD_CHECKSUM);
+
+    cf = (struct cio_file *) chunk->backend;
+    TEST_CHECK(cf->map == NULL);
+
+    cio_destroy(ctx);
+}
+
+/*
+ * When both the primary and the shadow CRC fields are damaged (even with intact
+ * content), recovery must fail closed rather than fabricate an accept.
+ */
+static void test_fs_shadow_rejects_both_tuples_corrupt()
+{
+    int ret;
+    int err;
+    char *hash;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "shadow both corrupt payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_shadow_both", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    /* Corrupt the primary CRC and the shadow CRC, leaving content intact */
+    cf = (struct cio_file *) chunk->backend;
+    hash = cio_file_hash(cf);
+    hash[0] ^= 0xff;
+    cf->map[CIO_FILE_SHADOW_HASH_OFFSET] ^= 0xff;
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_CORRUPTED);
+    TEST_CHECK(cio_error_get(chunk) == CIO_ERR_BAD_CHECKSUM);
+
+    cf = (struct cio_file *) chunk->backend;
+    TEST_CHECK(cf->map == NULL);
+
+    cio_destroy(ctx);
+}
+
+/*
+ * Wire-format contract + rollback safety.
+ *
+ * Pins the exact on-disk header bytes a freshly synced checksum chunk produces,
+ * computed independently from the documented format (CRC32 of the content
+ * section, finalized, stored big-endian at offset 2):
+ *
+ *   - bytes 2..5  : finalized CRC32, big-endian
+ *   - bytes 6..9  : kept zero
+ *   - bytes 10..13: content length, big-endian
+ *
+ * Rollback safety scope: an OLDER chunkio binary that reads these chunks after
+ * a downgrade compares sizeof(crc_t) bytes starting at offset 2.
+ *   - little-endian 64-bit (x86_64, aarch64) and big-endian 32-bit readers:
+ *     compatible. They expect the significant CRC bytes at offset 2 and zeros
+ *     filling the rest, which is exactly what we write, so the chunk is
+ *     accepted. This covers every architecture Fluent Bit ships on.
+ *   - big-endian 64-bit readers (s390x, ppc64be): NOT rollback compatible. With
+ *     an 8-byte crc_t those builds expected the significant bytes at offset 6..9
+ *     and zeros at 2..5 -- the mirror of the canonical layout. The canonical
+ *     format was deliberately chosen to be portable across architectures
+ *     (forward compatible: see fs_legacy_big_endian_wide_checksum_migrates,
+ *     which lets the current code READ such legacy chunks), at the cost of
+ *     downgrade compatibility on big-endian 64-bit specifically.
+ *
+ * If any of the asserted bytes drift, old little-endian binaries would reject
+ * chunks written by new ones.
+ */
+static void test_fs_format_contract_new_chunk_layout()
+{
+    int ret;
+    int err;
+    crc_t crc;
+    uint32_t expected_crc;
+    uint8_t region[2 + 64];
+    uint8_t legacy_field[8];
+    size_t region_len;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "wire format contract payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_contract", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    /*
+     * Independently compute the CRC the way the format documents it: over the
+     * content section which begins with the 2-byte metadata-length field
+     * (zero here, no metadata) followed by the user content.
+     */
+    region[0] = 0x00;
+    region[1] = 0x00;
+    memcpy(region + 2, line, strlen(line));
+    region_len = 2 + strlen(line);
+
+    crc = cio_crc32_init();
+    crc = cio_crc32_update(crc, region, region_len);
+    expected_crc = (uint32_t) cio_crc32_finalize(crc);
+
+    cf = (struct cio_file *) chunk->backend;
+
+    /*
+     * Assert the raw bytes are stored most-significant-byte first, independent
+     * of host endianness. These per-byte checks fail on a little-endian host if
+     * the implementation were ever changed to a native memcpy (which would put
+     * the least-significant byte at offset 2), so they guard portability even
+     * when CI only runs on little-endian.
+     */
+    TEST_CHECK((uint8_t) cf->map[2] == (uint8_t) ((expected_crc >> 24) & 0xFF));
+    TEST_CHECK((uint8_t) cf->map[3] == (uint8_t) ((expected_crc >> 16) & 0xFF));
+    TEST_CHECK((uint8_t) cf->map[4] == (uint8_t) ((expected_crc >>  8) & 0xFF));
+    TEST_CHECK((uint8_t) cf->map[5] == (uint8_t) ((expected_crc >>  0) & 0xFF));
+
+    /* Primary CRC at bytes 2..5, big-endian */
+    TEST_CHECK(get_test_header_u32(cf->map, 2) == expected_crc);
+
+    /* Legacy CRC padding bytes 6..9 must stay zero (little-endian rollback) */
+    TEST_CHECK(get_test_header_u32(cf->map,
+                                   CIO_FILE_LEGACY_CRC_PADDING_OFFSET) == 0);
+
+    /* Content length at bytes 10..13, big-endian (most-significant byte first) */
+    TEST_CHECK((uint8_t) cf->map[CIO_FILE_CONTENT_LENGTH_OFFSET + 0] ==
+               (uint8_t) (((uint32_t) strlen(line) >> 24) & 0xFF));
+    TEST_CHECK((uint8_t) cf->map[CIO_FILE_CONTENT_LENGTH_OFFSET + 1] ==
+               (uint8_t) (((uint32_t) strlen(line) >> 16) & 0xFF));
+    TEST_CHECK((uint8_t) cf->map[CIO_FILE_CONTENT_LENGTH_OFFSET + 2] ==
+               (uint8_t) (((uint32_t) strlen(line) >>  8) & 0xFF));
+    TEST_CHECK((uint8_t) cf->map[CIO_FILE_CONTENT_LENGTH_OFFSET + 3] ==
+               (uint8_t) (((uint32_t) strlen(line) >>  0) & 0xFF));
+    TEST_CHECK(get_test_header_u32(cf->map, CIO_FILE_CONTENT_LENGTH_OFFSET) ==
+               (uint32_t) strlen(line));
+
+    /*
+     * Emulate the exact comparison an old 64-bit reader performed:
+     * memcmp(map + 2, &crc_check, sizeof(crc_t)) where crc_check held the
+     * big-endian CRC in its low 4 bytes and zero in the upper 4. The new chunk
+     * must satisfy that 8-byte comparison.
+     */
+    legacy_field[0] = (uint8_t) ((expected_crc & 0xFF000000) >> 24);
+    legacy_field[1] = (uint8_t) ((expected_crc & 0x00FF0000) >> 16);
+    legacy_field[2] = (uint8_t) ((expected_crc & 0x0000FF00) >>  8);
+    legacy_field[3] = (uint8_t) ((expected_crc & 0x000000FF) >>  0);
+    legacy_field[4] = 0;
+    legacy_field[5] = 0;
+    legacy_field[6] = 0;
+    legacy_field[7] = 0;
+    TEST_CHECK(memcmp(cf->map + 2, legacy_field, sizeof(legacy_field)) == 0);
+
+    cio_destroy(ctx);
+}
+
+/*
+ * Golden legacy fixture: a chunk whose header is constructed by hand in the
+ * pre-shadow on-disk format (no shadow tuple), independent of the current
+ * writer, must be discovered and read correctly after a restart. This guards
+ * the millions of chunks already on disk from prior chunkio releases.
+ */
+static void test_fs_golden_legacy_chunk_loads()
+{
+    int ret;
+    int err;
+    FILE *fp;
+    char *buf;
+    size_t buf_size;
+    crc_t crc;
+    uint32_t crc_final;
+    uint8_t header[CIO_FILE_HEADER_MIN];
+    uint8_t region[2 + 64];
+    size_t region_len;
+    char path[PATH_MAX];
+    struct cio_ctx *ctx;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "golden legacy chunk payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_OPEN | CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+    if (!ctx) {
+        exit(1);
+    }
+
+    /* Create a real chunk so the stream directory and naming exist */
+    stream = cio_stream_create(ctx, "test_golden", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "chunk.0", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, "placeholder", 11);
+    TEST_CHECK(ret == CIO_OK);
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    snprintf(path, sizeof(path), "%s/%s/%s", CIO_ENV, "test_golden", "chunk.0");
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cio_destroy(ctx);
+
+    /*
+     * Overwrite the chunk file with a hand-built legacy image:
+     *   [0..1]   0xC1 0x00            magic
+     *   [2..5]   finalized CRC32 BE   over (2-byte meta len + content)
+     *   [6..9]   0                    legacy CRC padding
+     *   [10..13] content length BE
+     *   [14..21] 0                    no shadow tuple (legacy)
+     *   [22..23] 0                    metadata length
+     *   [24..]   content
+     */
+    region[0] = 0x00;
+    region[1] = 0x00;
+    memcpy(region + 2, line, strlen(line));
+    region_len = 2 + strlen(line);
+
+    crc = cio_crc32_init();
+    crc = cio_crc32_update(crc, region, region_len);
+    crc_final = (uint32_t) cio_crc32_finalize(crc);
+
+    memset(header, 0, sizeof(header));
+    header[0] = 0xc1;
+    header[1] = 0x00;
+    header[2] = (uint8_t) ((crc_final & 0xFF000000) >> 24);
+    header[3] = (uint8_t) ((crc_final & 0x00FF0000) >> 16);
+    header[4] = (uint8_t) ((crc_final & 0x0000FF00) >>  8);
+    header[5] = (uint8_t) ((crc_final & 0x000000FF) >>  0);
+    /* content length at offset 10, big-endian */
+    header[10] = (uint8_t) (((uint32_t) strlen(line) & 0xFF000000) >> 24);
+    header[11] = (uint8_t) (((uint32_t) strlen(line) & 0x00FF0000) >> 16);
+    header[12] = (uint8_t) (((uint32_t) strlen(line) & 0x0000FF00) >>  8);
+    header[13] = (uint8_t) (((uint32_t) strlen(line) & 0x000000FF) >>  0);
+
+    fp = fopen(path, "wb");
+    TEST_CHECK(fp != NULL);
+    if (!fp) {
+        exit(1);
+    }
+    TEST_CHECK(fwrite(header, 1, sizeof(header), fp) == sizeof(header));
+    TEST_CHECK(fwrite(line, 1, strlen(line), fp) == strlen(line));
+    fclose(fp);
+
+    /* Restart and discover the hand-built legacy chunk */
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_OPEN | CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+    if (!ctx) {
+        exit(1);
+    }
+
+    ret = cio_load(ctx, NULL);
+    TEST_CHECK(ret == CIO_OK);
+
+    stream = cio_stream_get(ctx, "test_golden");
+    TEST_CHECK(stream != NULL);
+    chunk = find_stream_chunk(stream, "chunk.0");
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    if (cio_chunk_is_up(chunk) == CIO_FALSE) {
+        ret = cio_chunk_up_force(chunk);
+        TEST_CHECK(ret == CIO_OK);
+    }
+
+    ret = cio_chunk_get_content(chunk, &buf, &buf_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(buf_size == strlen(line));
+    TEST_CHECK(memcmp(buf, line, strlen(line)) == 0);
+
+    cio_destroy(ctx);
+}
+
+/*
+ * Cross-endianness upgrade: an older 64-bit BIG-ENDIAN build stored the
+ * finalized crc as a full 8-byte crc_t, landing the significant bytes at
+ * offset 6..9 with the canonical slot (offset 2..5) left zero. This test
+ * reproduces that exact on-disk layout (in an endianness-independent way, so it
+ * runs on any host), then verifies the current code recovers the content and
+ * migrates the chunk into the canonical portable layout.
+ */
+static void test_fs_legacy_big_endian_wide_checksum_migrates()
+{
+    int ret;
+    int err;
+    char *out_buf;
+    size_t out_size;
+    uint32_t real_crc;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "legacy big-endian wide crc payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_legacy_be64", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cf = (struct cio_file *) chunk->backend;
+
+    /*
+     * Rewrite the header into the legacy 64-bit big-endian layout:
+     *   - move the finalized crc from the canonical slot (2..5) to 6..9
+     *   - zero the canonical slot
+     *   - drop the shadow tuple (it did not exist in that era)
+     */
+    real_crc = get_test_header_u32(cf->map, 2);
+    set_test_header_u32(cf->map, CIO_FILE_LEGACY_CRC_PADDING_OFFSET, real_crc);
+    set_test_header_u32(cf->map, 2, 0);
+    memset(cf->map + CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET, 0, 4);
+    memset(cf->map + CIO_FILE_SHADOW_HASH_OFFSET, 0, 4);
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    /* Bring it up read/write: recovery + migration to canonical layout */
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(line));
+    TEST_CHECK(memcmp(out_buf, line, out_size) == 0);
+    free(out_buf);
+
+    /* After migration the crc must live in the canonical slot, padding zeroed */
+    cf = (struct cio_file *) chunk->backend;
+    TEST_CHECK(get_test_header_u32(cf->map, 2) == real_crc);
+    TEST_CHECK(get_test_header_u32(cf->map,
+                                   CIO_FILE_LEGACY_CRC_PADDING_OFFSET) == 0);
+
+    /* And it must keep validating through a normal restart cycle */
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(line));
+    TEST_CHECK(memcmp(out_buf, line, out_size) == 0);
+    free(out_buf);
+
+    cio_destroy(ctx);
+}
+
+/*
+ * Read-only counterpart of the legacy big-endian recovery: opening such a
+ * chunk read-only must recover the content in memory but must NOT rewrite the
+ * header (no migration to the canonical layout). The on-disk bytes 2..9 must be
+ * byte-for-byte identical before and after the read-only open.
+ */
+static void test_fs_legacy_big_endian_wide_checksum_read_only()
+{
+    int ret;
+    int err;
+    FILE *fp;
+    char *out_buf;
+    size_t out_size;
+    uint32_t real_crc;
+    unsigned char before[8];
+    unsigned char after[8];
+    char path[1024];
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "legacy big-endian read-only payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_legacy_be64_ro", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    /* Reproduce the legacy 64-bit big-endian layout (crc at 6..9, no shadow) */
+    cf = (struct cio_file *) chunk->backend;
+    real_crc = get_test_header_u32(cf->map, 2);
+    set_test_header_u32(cf->map, CIO_FILE_LEGACY_CRC_PADDING_OFFSET, real_crc);
+    set_test_header_u32(cf->map, 2, 0);
+    memset(cf->map + CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET, 0, 4);
+    memset(cf->map + CIO_FILE_SHADOW_HASH_OFFSET, 0, 4);
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    TEST_CHECK(ret == CIO_OK);
+
+    snprintf(path, sizeof(path), "%s/%s/%s", CIO_ENV,
+             "test_legacy_be64_ro", "test");
+
+    cio_destroy(ctx);
+
+    /* Snapshot on-disk bytes 2..9 before the read-only open */
+    fp = fopen(path, "rb");
+    TEST_CHECK(fp != NULL);
+    if (!fp) {
+        exit(1);
+    }
+    TEST_CHECK(fseek(fp, 2, SEEK_SET) == 0);
+    TEST_CHECK(fread(before, 1, sizeof(before), fp) == sizeof(before));
+    fclose(fp);
+
+    /* Open read-only: content recovered in memory, nothing persisted */
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_OPEN_RD | CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_legacy_be64_ro", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN_RD, 0, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(line));
+    TEST_CHECK(memcmp(out_buf, line, out_size) == 0);
+    free(out_buf);
+
+    cio_destroy(ctx);
+
+    /* On-disk header must be untouched: still legacy layout, not migrated */
+    fp = fopen(path, "rb");
+    TEST_CHECK(fp != NULL);
+    if (!fp) {
+        exit(1);
+    }
+    TEST_CHECK(fseek(fp, 2, SEEK_SET) == 0);
+    TEST_CHECK(fread(after, 1, sizeof(after), fp) == sizeof(after));
+    fclose(fp);
+
+    TEST_CHECK(memcmp(before, after, sizeof(before)) == 0);
+    /*
+     * after[] starts at file offset 2, so after[0..3] is the canonical slot
+     * (offsets 2..5) and after[4..7] is the legacy slot (offsets 6..9). The
+     * canonical slot must still be empty and the crc must still live in the
+     * legacy slot -- i.e. no migration happened on a read-only open.
+     */
+    TEST_CHECK(get_test_header_u32((char *) after, 0) == 0);
+    TEST_CHECK(get_test_header_u32((char *) after, 4) == real_crc);
 }
 
 
@@ -1994,9 +2835,9 @@ static void test_metadata_unsigned_underflow()
     TEST_CHECK(ret == CIO_OK);
     TEST_CHECK(content_size == strlen(content_data));
     TEST_CHECK(memcmp(content_buf, content_data, strlen(content_data)) == 0);
+    free(content_buf);
 
     /* Step 6: Sync to disk to ensure persistence */
-    free(content_buf);
     ret = cio_chunk_sync(chunk);
     TEST_CHECK(ret == CIO_OK);
 
@@ -2038,6 +2879,14 @@ TEST_LIST = {
     {"fs_shadow_checksum_recovers_stale_primary", test_fs_shadow_checksum_recovers_stale_primary},
     {"fs_write_at_zero_truncates_synced_checksum", test_fs_write_at_zero_truncates_synced_checksum},
     {"fs_legacy_checksum_without_shadow_header", test_fs_legacy_checksum_without_shadow_header},
+    {"fs_old_format_loads_via_restart", test_fs_old_format_loads_via_restart},
+    {"fs_shadow_rejects_oversized_length", test_fs_shadow_rejects_oversized_length},
+    {"fs_shadow_rejects_corrupt_content", test_fs_shadow_rejects_corrupt_content},
+    {"fs_shadow_rejects_both_tuples_corrupt", test_fs_shadow_rejects_both_tuples_corrupt},
+    {"fs_format_contract_new_chunk_layout", test_fs_format_contract_new_chunk_layout},
+    {"fs_golden_legacy_chunk_loads", test_fs_golden_legacy_chunk_loads},
+    {"fs_legacy_big_endian_wide_checksum_migrates", test_fs_legacy_big_endian_wide_checksum_migrates},
+    {"fs_legacy_big_endian_wide_checksum_read_only", test_fs_legacy_big_endian_wide_checksum_read_only},
     {"fs_fluent_bit_storage_lifecycle", test_fs_fluent_bit_storage_lifecycle},
     {"fs_fluent_bit_delete_irrecoverable_on_load", test_fs_fluent_bit_delete_irrecoverable_on_load},
     {"fs_up_down_up_append", test_fs_up_down_up_append},
