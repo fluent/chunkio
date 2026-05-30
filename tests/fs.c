@@ -51,6 +51,18 @@ static int log_cb(struct cio_ctx *ctx, int level, const char *file, int line,
     return 0;
 }
 
+static void set_test_header_u32(char *map, int offset, uint32_t value)
+{
+    uint8_t *buffer;
+
+    buffer = (uint8_t *) &map[offset];
+
+    buffer[0] = (uint8_t) ((value & 0xFF000000) >> 24);
+    buffer[1] = (uint8_t) ((value & 0x00FF0000) >> 16);
+    buffer[2] = (uint8_t) ((value & 0x0000FF00) >>  8);
+    buffer[3] = (uint8_t) ((value & 0x000000FF) >>  0);
+}
+
 /* Test API generating files to the file system and then scanning them back */
 static void test_fs_write()
 {
@@ -769,7 +781,7 @@ static void test_fs_recover_unfinalized_checksum()
     cf = (struct cio_file *) chunk->backend;
     crc_unfinalized = cf->crc_cur;
     hash = cio_file_hash(cf);
-    memcpy(hash, &crc_unfinalized, sizeof(crc_unfinalized));
+    memcpy(hash, &crc_unfinalized, 4);
 
     ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
     TEST_CHECK(ret == CIO_OK);
@@ -791,6 +803,301 @@ static void test_fs_recover_unfinalized_checksum()
 
     ret = cio_chunk_up(chunk);
     TEST_CHECK(ret == CIO_OK);
+
+    cio_destroy(ctx);
+}
+
+static void test_fs_shadow_checksum_recovers_primary_header()
+{
+    int ret;
+    int err;
+    char *hash;
+    char *out_buf;
+    size_t out_size;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "shadow checksum payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_shadow_crc", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cf = (struct cio_file *) chunk->backend;
+    hash = cio_file_hash(cf);
+    hash[0] ^= 0xff;
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(line));
+    TEST_CHECK(memcmp(out_buf, line, out_size) == 0);
+    free(out_buf);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cio_destroy(ctx);
+}
+
+static void test_fs_shadow_checksum_recovers_primary_length()
+{
+    int ret;
+    int err;
+    char *out_buf;
+    size_t out_size;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "shadow checksum payload\n";
+    char tail[] = "after recovery\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_shadow_len", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cf = (struct cio_file *) chunk->backend;
+    cio_file_st_set_content_len(cf->map, 5);
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(line));
+    TEST_CHECK(memcmp(out_buf, line, out_size) == 0);
+    free(out_buf);
+
+    ret = cio_chunk_write(chunk, tail, strlen(tail));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(line) + strlen(tail));
+    TEST_CHECK(memcmp(out_buf, line, strlen(line)) == 0);
+    TEST_CHECK(memcmp(out_buf + strlen(line), tail, strlen(tail)) == 0);
+    free(out_buf);
+
+    cio_destroy(ctx);
+}
+
+static void test_fs_shadow_checksum_recovers_stale_primary()
+{
+    int ret;
+    int err;
+    char *out_buf;
+    size_t out_size;
+    crc_t crc;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "shadow checksum payload\n";
+    char tail[] = "after recovery\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_shadow_stale", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_write(chunk, tail, strlen(tail));
+    TEST_CHECK(ret == CIO_OK);
+
+    cf = (struct cio_file *) chunk->backend;
+    cf->crc_cur = cio_crc32_init();
+    cio_file_calculate_checksum(cf, &crc);
+    cf->crc_cur = crc;
+
+    set_test_header_u32(cf->map,
+                        CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET,
+                        (uint32_t) cf->data_size);
+    set_test_header_u32(cf->map,
+                        CIO_FILE_SHADOW_HASH_OFFSET,
+                        (uint32_t) cio_crc32_finalize(crc));
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    TEST_CHECK(ret == CIO_OK);
+
+    cf->synced = CIO_TRUE;
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(line) + strlen(tail));
+    TEST_CHECK(memcmp(out_buf, line, strlen(line)) == 0);
+    TEST_CHECK(memcmp(out_buf + strlen(line), tail, strlen(tail)) == 0);
+    free(out_buf);
+
+    cio_destroy(ctx);
+}
+
+static void test_fs_legacy_checksum_without_shadow_header()
+{
+    int ret;
+    int err;
+    char *out_buf;
+    size_t out_size;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char line[] = "legacy checksum payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_legacy_crc", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cf = (struct cio_file *) chunk->backend;
+    TEST_CHECK(cf->map[CIO_FILE_LEGACY_CRC_PADDING_OFFSET + 0] == 0);
+    TEST_CHECK(cf->map[CIO_FILE_LEGACY_CRC_PADDING_OFFSET + 1] == 0);
+    TEST_CHECK(cf->map[CIO_FILE_LEGACY_CRC_PADDING_OFFSET + 2] == 0);
+    TEST_CHECK(cf->map[CIO_FILE_LEGACY_CRC_PADDING_OFFSET + 3] == 0);
+
+    memset(cf->map + CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET, 0, 4);
+    memset(cf->map + CIO_FILE_SHADOW_HASH_OFFSET, 0, 4);
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(line));
+    TEST_CHECK(memcmp(out_buf, line, out_size) == 0);
+    free(out_buf);
 
     cio_destroy(ctx);
 }
@@ -938,6 +1245,15 @@ static void truncate_file(struct cio_file *chunk_file,
         chunk_file->map[CIO_FILE_CONTENT_LENGTH_OFFSET + 1] = 0;
         chunk_file->map[CIO_FILE_CONTENT_LENGTH_OFFSET + 2] = 0;
         chunk_file->map[CIO_FILE_CONTENT_LENGTH_OFFSET + 3] = 0;
+
+        chunk_file->map[CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET + 0] = 0;
+        chunk_file->map[CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET + 1] = 0;
+        chunk_file->map[CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET + 2] = 0;
+        chunk_file->map[CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET + 3] = 0;
+        chunk_file->map[CIO_FILE_SHADOW_HASH_OFFSET + 0] = 0;
+        chunk_file->map[CIO_FILE_SHADOW_HASH_OFFSET + 1] = 0;
+        chunk_file->map[CIO_FILE_SHADOW_HASH_OFFSET + 2] = 0;
+        chunk_file->map[CIO_FILE_SHADOW_HASH_OFFSET + 3] = 0;
     }
 
     result = cio_file_native_unmap(chunk_file);
@@ -1183,6 +1499,10 @@ TEST_LIST = {
     {"issue_flb_2025", test_issue_flb_2025},
     {"issue_write_at", test_issue_write_at},
     {"fs_recover_unfinalized_checksum", test_fs_recover_unfinalized_checksum},
+    {"fs_shadow_checksum_recovers_primary_header", test_fs_shadow_checksum_recovers_primary_header},
+    {"fs_shadow_checksum_recovers_primary_length", test_fs_shadow_checksum_recovers_primary_length},
+    {"fs_shadow_checksum_recovers_stale_primary", test_fs_shadow_checksum_recovers_stale_primary},
+    {"fs_legacy_checksum_without_shadow_header", test_fs_legacy_checksum_without_shadow_header},
     {"fs_up_down_up_append", test_fs_up_down_up_append},
     {"fs_deep_hierachy", test_deep_hierarchy},
     {"legacy_success", test_legacy_success},
