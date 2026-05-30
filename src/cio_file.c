@@ -188,7 +188,16 @@ static int recover_unfinalized_checksum(struct cio_chunk *ch,
 {
     int ret;
 
-    if (memcmp(hash, &crc, CIO_FILE_CRC_FIELD_SIZE) != 0) {
+    /*
+     * Legacy chunks stored the in-progress (non finalized) crc by copying the
+     * raw crc_t with memcpy(map + 2, &crc, sizeof(crc)). crc_t is uint_fast32_t,
+     * which is 8 bytes on most LP64 targets, so the comparison must use the same
+     * native width: on big-endian 64-bit the significant bytes live at offset
+     * 6..9 with zeros at 2..5, and a fixed 4-byte compare would spuriously match
+     * the zero bytes. Comparing sizeof(crc) reproduces exactly what the legacy
+     * writer emitted on this architecture, on both little- and big-endian.
+     */
+    if (memcmp(hash, &crc, sizeof(crc)) != 0) {
         return CIO_FALSE;
     }
 
@@ -277,6 +286,68 @@ static int recover_shadow_header(struct cio_chunk *ch, struct cio_file *cf)
     else {
         cio_log_warn(ch->ctx,
                      "[cio file] could not persist shadow crc32 at %s/%s",
+                     ch->name, cf->path);
+    }
+
+    return CIO_TRUE;
+}
+
+/*
+ * Older 64-bit big-endian builds finalized the crc and stored it with
+ * memcpy(map + 2, &crc, sizeof(crc_t)). With an 8-byte crc_t the big-endian
+ * representation placed the four significant bytes at offset 6..9 and left the
+ * canonical primary slot (offset 2..5) zero -- the mirror image of the
+ * little-endian layout the current code reads. (Old 32-bit big-endian builds
+ * used a 4-byte crc_t and already wrote the canonical offset, so only LP64
+ * big-endian chunks need this fallback.)
+ *
+ * Detect that layout in an endianness-independent way: the canonical slot must
+ * be empty and the big-endian value at offset 6 must equal the finalized crc of
+ * the content. When matched, accept it and, if the chunk is writable, rewrite
+ * it into the canonical portable layout so future reads are O(1) and the file
+ * becomes architecture independent.
+ */
+static int recover_legacy_wide_checksum(struct cio_chunk *ch,
+                                        struct cio_file *cf,
+                                        crc_t crc, uint32_t crc_check)
+{
+    int ret;
+    uint32_t legacy_crc;
+
+    /* The canonical primary crc slot must be empty for this legacy layout */
+    if (get_header_u32(cf->map, 2) != 0) {
+        return CIO_FALSE;
+    }
+
+    legacy_crc = get_header_u32(cf->map, CIO_FILE_LEGACY_CRC_PADDING_OFFSET);
+    if (legacy_crc == 0 || legacy_crc != crc_check) {
+        return CIO_FALSE;
+    }
+
+    cf->crc_cur = crc;
+
+    if (!(cf->flags & CIO_OPEN_RW)) {
+        cio_log_info(ch->ctx,
+                     "[cio file] accepted legacy big-endian crc32 at %s/%s "
+                     "(read-only)", ch->name, cf->path);
+
+        return CIO_TRUE;
+    }
+
+    /* Migrate to the canonical layout: crc at offset 2, padding zeroed */
+    write_checksum(cf, crc_check);
+    cf->synced = CIO_FALSE;
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    if (ret == CIO_OK) {
+        cf->synced = CIO_TRUE;
+        cio_log_info(ch->ctx,
+                     "[cio file] migrated legacy big-endian crc32 at %s/%s",
+                     ch->name, cf->path);
+    }
+    else {
+        cio_log_warn(ch->ctx,
+                     "[cio file] could not persist migrated crc32 at %s/%s",
                      ch->name, cf->path);
     }
 
@@ -450,6 +521,11 @@ static int cio_file_format_check(struct cio_chunk *ch,
                 ret = recover_unfinalized_checksum(ch, cf, p, crc);
                 if (ret == CIO_FALSE) {
                     ret = recover_shadow_header(ch, cf);
+                    if (ret == CIO_FALSE) {
+                        ret = recover_legacy_wide_checksum(ch, cf, crc,
+                                                           crc_check);
+                    }
+
                     if (ret == CIO_FALSE) {
                         cio_log_info(ch->ctx, "[cio file] invalid crc32 at %s/%s",
                                       ch->name, cf->path);
