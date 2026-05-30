@@ -1228,9 +1228,6 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
 
     if (count == 0) {
         if (cf->crc_reset) {
-            cf->taint_flag = CIO_TRUE;
-            cio_file_st_set_content_len(cf->map, cf->data_size);
-
             if (ch->ctx->options.flags & CIO_CHECKSUM) {
                 cf->crc_cur = cio_crc32_init();
                 cio_file_calculate_checksum(cf, &cf->crc_cur);
@@ -1238,6 +1235,11 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
 
             cf->crc_reset = CIO_FALSE;
             cf->synced = CIO_FALSE;
+            cf->taint_flag = CIO_TRUE;
+
+            if (!(ch->ctx->options.flags & CIO_CHECKSUM)) {
+                cio_file_st_set_content_len(cf->map, cf->data_size);
+            }
         }
 
         return 0;

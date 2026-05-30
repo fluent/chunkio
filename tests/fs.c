@@ -1035,6 +1035,94 @@ static void test_fs_shadow_checksum_recovers_stale_primary()
     cio_destroy(ctx);
 }
 
+static void test_fs_write_at_zero_truncates_synced_checksum()
+{
+    int ret;
+    int err;
+    char *out_buf;
+    size_t out_size;
+    struct cio_ctx *ctx;
+    struct cio_file *cf;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char head[] = "valid records\n";
+    char stale[] = "stale records\n";
+    char next[] = "next records\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_write_at_zero_crc", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, head, strlen(head));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_write(chunk, stale, strlen(stale));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_write_at(chunk, strlen(head), NULL, 0);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(head));
+    TEST_CHECK(memcmp(out_buf, head, out_size) == 0);
+    free(out_buf);
+
+    ret = cio_chunk_write(chunk, next, strlen(next));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(head) + strlen(next));
+    TEST_CHECK(memcmp(out_buf, head, strlen(head)) == 0);
+    TEST_CHECK(memcmp(out_buf + strlen(head), next, strlen(next)) == 0);
+    free(out_buf);
+
+    cf = (struct cio_file *) chunk->backend;
+    TEST_CHECK(cf->map[CIO_FILE_LEGACY_CRC_PADDING_OFFSET + 0] == 0);
+    TEST_CHECK(cf->map[CIO_FILE_LEGACY_CRC_PADDING_OFFSET + 1] == 0);
+    TEST_CHECK(cf->map[CIO_FILE_LEGACY_CRC_PADDING_OFFSET + 2] == 0);
+    TEST_CHECK(cf->map[CIO_FILE_LEGACY_CRC_PADDING_OFFSET + 3] == 0);
+
+    cio_destroy(ctx);
+}
+
 static void test_fs_legacy_checksum_without_shadow_header()
 {
     int ret;
@@ -1502,6 +1590,7 @@ TEST_LIST = {
     {"fs_shadow_checksum_recovers_primary_header", test_fs_shadow_checksum_recovers_primary_header},
     {"fs_shadow_checksum_recovers_primary_length", test_fs_shadow_checksum_recovers_primary_length},
     {"fs_shadow_checksum_recovers_stale_primary", test_fs_shadow_checksum_recovers_stale_primary},
+    {"fs_write_at_zero_truncates_synced_checksum", test_fs_write_at_zero_truncates_synced_checksum},
     {"fs_legacy_checksum_without_shadow_header", test_fs_legacy_checksum_without_shadow_header},
     {"fs_up_down_up_append", test_fs_up_down_up_append},
     {"fs_deep_hierachy", test_deep_hierarchy},
