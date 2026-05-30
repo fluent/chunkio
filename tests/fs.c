@@ -22,6 +22,7 @@
 #include <arpa/inet.h>
 #endif
 #include <stdio.h>
+#include <string.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -62,6 +63,27 @@ static void set_test_header_u32(char *map, int offset, uint32_t value)
     buffer[1] = (uint8_t) ((value & 0x00FF0000) >> 16);
     buffer[2] = (uint8_t) ((value & 0x0000FF00) >>  8);
     buffer[3] = (uint8_t) ((value & 0x000000FF) >>  0);
+}
+
+static struct cio_chunk *find_stream_chunk(struct cio_stream *stream,
+                                           const char *name)
+{
+    struct mk_list *head;
+    struct cio_chunk *chunk;
+
+    if (stream == NULL || name == NULL) {
+        return NULL;
+    }
+
+    mk_list_foreach(head, &stream->chunks) {
+        chunk = mk_list_entry(head, struct cio_chunk, _head);
+
+        if (strcmp(chunk->name, name) == 0) {
+            return chunk;
+        }
+    }
+
+    return NULL;
 }
 
 /* Test API generating files to the file system and then scanning them back */
@@ -1545,6 +1567,325 @@ void test_legacy_failure()
 }
 
 /*
+ * Exercise the filesystem/checksum call pattern used by Fluent Bit storage:
+ * create a chunk with metadata, reload it with cio_load(), bring it up for
+ * backlog processing, lock/down it, truncate the valid content prefix through
+ * cio_chunk_write_at(..., NULL, 0), reload again, append, and copy to a DLQ
+ * style stream.
+ */
+static void test_fs_fluent_bit_storage_lifecycle()
+{
+    int ret;
+    int err;
+    int meta_len;
+    char *buf;
+    char *meta_buf;
+    void *copy_buf;
+    size_t buf_size;
+    size_t copy_size;
+    size_t valid_size;
+    ssize_t content_size;
+    ssize_t real_size;
+    struct stat st;
+    struct cio_ctx *ctx;
+    struct cio_chunk *chunk;
+    struct cio_chunk *dlq_chunk;
+    struct cio_file *cf;
+    struct cio_stream *stream;
+    struct cio_stream *dlq_stream;
+    struct cio_options cio_opts;
+    char path[1024];
+    char meta[] = "event_type=logs;tag=fb.test";
+    char valid[] = "record one\nrecord two\n";
+    char stale[] = "partial trailing record";
+    char next[] = "record three\n";
+
+    valid_size = strlen(valid);
+    copy_buf = NULL;
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_OPEN | CIO_CHECKSUM | CIO_FULL_SYNC | CIO_TRIM_FILES;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+    if (!ctx) {
+        exit(1);
+    }
+
+    cio_set_max_chunks_up(ctx, 1);
+
+    stream = cio_stream_create(ctx, "fluent-bit", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "chunk.0", CIO_OPEN, 64, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_meta_write(chunk, meta, strlen(meta));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_write(chunk, valid, strlen(valid));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_write(chunk, stale, strlen(stale));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    snprintf(path, sizeof(path), "%s/%s/%s", CIO_ENV, "fluent-bit", "chunk.0");
+    ret = stat(path, &st);
+    TEST_CHECK(ret == 0);
+    real_size = cio_chunk_get_real_size(chunk);
+    TEST_CHECK(real_size == st.st_size);
+
+    content_size = cio_chunk_get_content_size(chunk);
+    TEST_CHECK(content_size == (ssize_t) (strlen(valid) + strlen(stale)));
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cio_destroy(ctx);
+
+    cio_options_init(&cio_opts);
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_OPEN | CIO_CHECKSUM | CIO_FULL_SYNC | CIO_TRIM_FILES;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+    if (!ctx) {
+        exit(1);
+    }
+
+    cio_set_max_chunks_up(ctx, 1);
+
+    ret = cio_load(ctx, NULL);
+    TEST_CHECK(ret == CIO_OK);
+
+    stream = cio_stream_get(ctx, "fluent-bit");
+    TEST_CHECK(stream != NULL);
+    chunk = find_stream_chunk(stream, "chunk.0");
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    if (cio_chunk_is_up(chunk) == CIO_TRUE) {
+        ret = cio_chunk_down(chunk);
+        TEST_CHECK(ret == CIO_OK);
+    }
+
+    if (cio_chunk_is_up(chunk) == CIO_FALSE) {
+        ret = cio_chunk_up_force(chunk);
+        TEST_CHECK(ret == CIO_OK);
+    }
+
+    ret = cio_meta_read(chunk, &meta_buf, &meta_len);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(meta_len == (int) strlen(meta));
+    TEST_CHECK(memcmp(meta_buf, meta, strlen(meta)) == 0);
+
+    ret = cio_chunk_get_content(chunk, &buf, &buf_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(buf_size == strlen(valid) + strlen(stale));
+    TEST_CHECK(memcmp(buf, valid, strlen(valid)) == 0);
+    TEST_CHECK(memcmp(buf + strlen(valid), stale, strlen(stale)) == 0);
+
+    ret = cio_chunk_lock(chunk);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(cio_chunk_is_locked(chunk) == CIO_TRUE);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    if (cio_chunk_is_up(chunk) == CIO_FALSE) {
+        ret = cio_chunk_up_force(chunk);
+        TEST_CHECK(ret == CIO_OK);
+    }
+
+    ret = cio_chunk_write_at(chunk, (off_t) valid_size, NULL, 0);
+    TEST_CHECK(ret == CIO_OK);
+
+    content_size = cio_chunk_get_content_size(chunk);
+    TEST_CHECK(content_size == (ssize_t) valid_size);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cio_destroy(ctx);
+
+    cio_options_init(&cio_opts);
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_OPEN | CIO_CHECKSUM | CIO_FULL_SYNC | CIO_TRIM_FILES;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+    if (!ctx) {
+        exit(1);
+    }
+
+    ret = cio_load(ctx, NULL);
+    TEST_CHECK(ret == CIO_OK);
+
+    stream = cio_stream_get(ctx, "fluent-bit");
+    TEST_CHECK(stream != NULL);
+    chunk = find_stream_chunk(stream, "chunk.0");
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    if (cio_chunk_is_up(chunk) == CIO_FALSE) {
+        ret = cio_chunk_up_force(chunk);
+        TEST_CHECK(ret == CIO_OK);
+    }
+
+    ret = cio_chunk_get_content_copy(chunk, &copy_buf, &copy_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(copy_size == strlen(valid));
+    TEST_CHECK(memcmp(copy_buf, valid, strlen(valid)) == 0);
+    free(copy_buf);
+    copy_buf = NULL;
+
+    ret = cio_chunk_write(chunk, next, strlen(next));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up_force(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_get_content_copy(chunk, &copy_buf, &copy_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(copy_size == strlen(valid) + strlen(next));
+    TEST_CHECK(memcmp(copy_buf, valid, strlen(valid)) == 0);
+    TEST_CHECK(memcmp((char *) copy_buf + strlen(valid), next, strlen(next)) == 0);
+
+    dlq_stream = cio_stream_create(ctx, "rejected", CIO_STORE_FS);
+    TEST_CHECK(dlq_stream != NULL);
+
+    dlq_chunk = cio_chunk_open(ctx, dlq_stream, "fb.test_500_out.flb",
+                               CIO_OPEN, copy_size, &err);
+    TEST_CHECK(dlq_chunk != NULL);
+    if (!dlq_chunk) {
+        free(copy_buf);
+        exit(1);
+    }
+
+    ret = cio_chunk_write(dlq_chunk, copy_buf, copy_size);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(dlq_chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cio_chunk_close(dlq_chunk, CIO_FALSE);
+    free(copy_buf);
+
+    cf = (struct cio_file *) chunk->backend;
+    TEST_CHECK(cf->map[CIO_FILE_LEGACY_CRC_PADDING_OFFSET + 0] == 0);
+    TEST_CHECK(cf->map[CIO_FILE_LEGACY_CRC_PADDING_OFFSET + 1] == 0);
+    TEST_CHECK(cf->map[CIO_FILE_LEGACY_CRC_PADDING_OFFSET + 2] == 0);
+    TEST_CHECK(cf->map[CIO_FILE_LEGACY_CRC_PADDING_OFFSET + 3] == 0);
+
+    if (cio_chunk_is_locked(chunk) == CIO_TRUE) {
+        ret = cio_chunk_unlock(chunk);
+        TEST_CHECK(ret == CIO_OK);
+    }
+
+    cio_destroy(ctx);
+}
+
+static void test_fs_fluent_bit_delete_irrecoverable_on_load()
+{
+    int ret;
+    int err;
+    struct stat st;
+    struct cio_ctx *ctx;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char path[1024];
+    char payload[] = "irrecoverable payload";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_OPEN | CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+    if (!ctx) {
+        exit(1);
+    }
+
+    stream = cio_stream_create(ctx, "fluent-bit-bad", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "bad.0", CIO_OPEN, 64, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_chunk_write(chunk, payload, strlen(payload));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_sync(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    snprintf(path, sizeof(path), "%s/%s/%s", CIO_ENV, "fluent-bit-bad", "bad.0");
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    truncate_file((struct cio_file *) chunk->backend, 1, CIO_FALSE);
+
+    cio_destroy(ctx);
+
+    cio_options_init(&cio_opts);
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_OPEN | CIO_CHECKSUM | CIO_DELETE_IRRECOVERABLE;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+    if (!ctx) {
+        exit(1);
+    }
+
+    ret = cio_load(ctx, NULL);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = stat(path, &st);
+    TEST_CHECK(ret == -1);
+
+    stream = cio_stream_get(ctx, "fluent-bit-bad");
+    TEST_CHECK(stream != NULL);
+    TEST_CHECK(find_stream_chunk(stream, "bad.0") == NULL);
+
+    cio_destroy(ctx);
+}
+
+/*
  * Test case: Prevent unsigned underflow when writing large metadata to a
  * chunk with small initial allocation.
  *
@@ -1697,6 +2038,8 @@ TEST_LIST = {
     {"fs_shadow_checksum_recovers_stale_primary", test_fs_shadow_checksum_recovers_stale_primary},
     {"fs_write_at_zero_truncates_synced_checksum", test_fs_write_at_zero_truncates_synced_checksum},
     {"fs_legacy_checksum_without_shadow_header", test_fs_legacy_checksum_without_shadow_header},
+    {"fs_fluent_bit_storage_lifecycle", test_fs_fluent_bit_storage_lifecycle},
+    {"fs_fluent_bit_delete_irrecoverable_on_load", test_fs_fluent_bit_delete_irrecoverable_on_load},
     {"fs_up_down_up_append", test_fs_up_down_up_append},
     {"fs_deep_hierachy", test_deep_hierarchy},
     {"legacy_success", test_legacy_success},
