@@ -61,37 +61,59 @@ char cio_file_init_bytes[] =   {
 };
 
 #define ROUND_UP(N, S) ((((N) + (S) - 1) / (S)) * (S))
+#define CIO_FILE_CRC_FIELD_SIZE 4
 
+static uint32_t get_header_u32(char *map, int offset)
+{
+    uint8_t *buffer;
 
-/* Calculate content checksum in a variable */
-void cio_file_calculate_checksum(struct cio_file *cf, crc_t *out)
+    buffer = (uint8_t *) &map[offset];
+
+    return (((uint32_t) buffer[0]) << 24) |
+           (((uint32_t) buffer[1]) << 16) |
+           (((uint32_t) buffer[2]) <<  8) |
+           (((uint32_t) buffer[3]) <<  0);
+}
+
+static void set_header_u32(char *map, int offset, uint32_t value)
+{
+    uint8_t *buffer;
+
+    buffer = (uint8_t *) &map[offset];
+
+    buffer[0] = (uint8_t) ((value & 0xFF000000) >> 24);
+    buffer[1] = (uint8_t) ((value & 0x00FF0000) >> 16);
+    buffer[2] = (uint8_t) ((value & 0x0000FF00) >>  8);
+    buffer[3] = (uint8_t) ((value & 0x000000FF) >>  0);
+}
+
+static void calculate_checksum_len(struct cio_file *cf,
+                                   size_t content_length,
+                                   crc_t *out)
 {
     crc_t val;
     size_t len;
-    ssize_t content_length;
     unsigned char *in_data;
-
-    if (cf->fs_size == 0) {
-        cio_file_update_size(cf);
-    }
 
     /* Metadata length header + metadata length + content length */
     len  = 2;
     len += cio_file_st_get_meta_len(cf->map);
-
-    content_length = cio_file_st_get_content_len(cf->map,
-                                                 cf->fs_size,
-                                                 cf->page_size,
-                                                 cf->taint_flag);
-
-    if (content_length > 0) {
-        len += content_length;
-    }
+    len += content_length;
 
     in_data = (unsigned char *) cf->map + CIO_FILE_CONTENT_OFFSET;
 
     val = cio_crc32_update(cf->crc_cur, in_data, len);
     *out = val;
+}
+
+/* Calculate content checksum in a variable */
+void cio_file_calculate_checksum(struct cio_file *cf, crc_t *out)
+{
+    if (cf->fs_size == 0) {
+        cio_file_update_size(cf);
+    }
+
+    calculate_checksum_len(cf, cf->data_size, out);
 }
 
 /* Update crc32 checksum into the memory map */
@@ -109,19 +131,54 @@ static void update_checksum(struct cio_file *cf,
     }
 
     crc = cio_crc32_update(cf->crc_cur, data, len);
-    memcpy(cf->map + 2, &crc, sizeof(crc));
     cf->crc_cur = crc;
+}
+
+static uint32_t finalize_checksum_value(crc_t crc)
+{
+    return (uint32_t) cio_crc32_finalize(crc);
+}
+
+static void write_checksum(struct cio_file *cf, uint32_t crc)
+{
+    set_header_u32(cf->map, 2, crc);
+    memset(cf->map + CIO_FILE_LEGACY_CRC_PADDING_OFFSET, 0,
+           CIO_FILE_LEGACY_CRC_PADDING_SIZE);
 }
 
 /* Finalize CRC32 context and update the memory map */
 static void finalize_checksum(struct cio_file *cf)
 {
-    crc_t crc;
+    uint32_t crc;
 
-    crc = cio_crc32_finalize(cf->crc_cur);
-    crc = htonl(crc);
+    crc = finalize_checksum_value(cf->crc_cur);
 
-    memcpy(cf->map + 2, &crc, sizeof(crc));
+    write_checksum(cf, crc);
+}
+
+static int shadow_header_exists(struct cio_file *cf)
+{
+    uint32_t content_length;
+    uint32_t crc;
+
+    content_length = get_header_u32(cf->map,
+                                    CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET);
+    crc = get_header_u32(cf->map, CIO_FILE_SHADOW_HASH_OFFSET);
+
+    if (content_length == 0 && crc == 0) {
+        return CIO_FALSE;
+    }
+
+    return CIO_TRUE;
+}
+
+static void write_shadow_header(struct cio_file *cf, uint32_t crc)
+{
+    set_header_u32(cf->map,
+                   CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET,
+                   (uint32_t) cf->data_size);
+
+    set_header_u32(cf->map, CIO_FILE_SHADOW_HASH_OFFSET, crc);
 }
 
 static int recover_unfinalized_checksum(struct cio_chunk *ch,
@@ -131,7 +188,7 @@ static int recover_unfinalized_checksum(struct cio_chunk *ch,
 {
     int ret;
 
-    if (memcmp(hash, &crc, sizeof(crc)) != 0) {
+    if (memcmp(hash, &crc, CIO_FILE_CRC_FIELD_SIZE) != 0) {
         return CIO_FALSE;
     }
 
@@ -157,6 +214,69 @@ static int recover_unfinalized_checksum(struct cio_chunk *ch,
     else {
         cio_log_warn(ch->ctx,
                      "[cio file] could not persist recovered crc32 at %s/%s",
+                     ch->name, cf->path);
+    }
+
+    return CIO_TRUE;
+}
+
+static int recover_shadow_header(struct cio_chunk *ch, struct cio_file *cf)
+{
+    int ret;
+    size_t metadata_length;
+    size_t content_length;
+    ssize_t logical_length;
+    crc_t crc;
+    uint32_t crc_check;
+    uint32_t stored_crc;
+
+    if (shadow_header_exists(cf) == CIO_FALSE) {
+        return CIO_FALSE;
+    }
+
+    metadata_length = cio_file_st_get_meta_len(cf->map);
+    content_length = get_header_u32(cf->map,
+                                    CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET);
+
+    logical_length = CIO_FILE_HEADER_MIN + metadata_length + content_length;
+    if (logical_length > cf->fs_size) {
+        return CIO_FALSE;
+    }
+
+    cf->crc_cur = cio_crc32_init();
+    calculate_checksum_len(cf, content_length, &crc);
+
+    crc_check = finalize_checksum_value(crc);
+    stored_crc = get_header_u32(cf->map, CIO_FILE_SHADOW_HASH_OFFSET);
+
+    if (stored_crc != crc_check) {
+        return CIO_FALSE;
+    }
+
+    cf->data_size = content_length;
+    cf->crc_cur = crc;
+
+    if (!(cf->flags & CIO_OPEN_RW)) {
+        cio_log_info(ch->ctx,
+                     "[cio file] accepted shadow crc32 at %s/%s (read-only)",
+                     ch->name, cf->path);
+
+        return CIO_TRUE;
+    }
+
+    cio_file_st_set_content_len(cf->map, (uint32_t) cf->data_size);
+    write_checksum(cf, crc_check);
+    cf->synced = CIO_FALSE;
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    if (ret == CIO_OK) {
+        cf->synced = CIO_TRUE;
+        cio_log_info(ch->ctx, "[cio file] recovered shadow crc32 at %s/%s",
+                     ch->name, cf->path);
+    }
+    else {
+        cio_log_warn(ch->ctx,
+                     "[cio file] could not persist shadow crc32 at %s/%s",
                      ch->name, cf->path);
     }
 
@@ -232,7 +352,9 @@ static int cio_file_format_check(struct cio_chunk *ch,
     ssize_t content_length;
     ssize_t logical_length;
     unsigned char *p;
-    crc_t crc_check;
+    uint32_t crc_check;
+    uint32_t shadow_content_length;
+    uint32_t stored_crc;
     crc_t crc;
 
     (void) flags;
@@ -297,6 +419,11 @@ static int cio_file_format_check(struct cio_chunk *ch,
                          content_length;
 
         if (logical_length > cf->fs_size) {
+            if ((ch->ctx->options.flags & CIO_CHECKSUM) &&
+                recover_shadow_header(ch, cf) == CIO_TRUE) {
+                return 0;
+            }
+
             cio_log_debug(ch->ctx, "[cio file] truncated file (%zd / %zd) %s",
                           cf->fs_size, logical_length, ch->name);
             cio_error_set(ch, CIO_ERR_BAD_FILE_SIZE);
@@ -311,22 +438,36 @@ static int cio_file_format_check(struct cio_chunk *ch,
 
             /* Get checksum stored in the mmap */
             p = (unsigned char *) cio_file_st_get_hash(cf->map);
+            stored_crc = get_header_u32(cf->map, 2);
 
             /* Calculate content checksum */
             cio_file_calculate_checksum(cf, &crc);
 
             /* Compare */
-            crc_check = cio_crc32_finalize(crc);
-            crc_check = htonl(crc_check);
+            crc_check = finalize_checksum_value(crc);
 
-            if (memcmp(p, &crc_check, sizeof(crc_check)) != 0) {
+            if (stored_crc != crc_check) {
                 ret = recover_unfinalized_checksum(ch, cf, p, crc);
                 if (ret == CIO_FALSE) {
-                    cio_log_info(ch->ctx, "[cio file] invalid crc32 at %s/%s",
-                                  ch->name, cf->path);
-                    cio_error_set(ch, CIO_ERR_BAD_CHECKSUM);
+                    ret = recover_shadow_header(ch, cf);
+                    if (ret == CIO_FALSE) {
+                        cio_log_info(ch->ctx, "[cio file] invalid crc32 at %s/%s",
+                                      ch->name, cf->path);
+                        cio_error_set(ch, CIO_ERR_BAD_CHECKSUM);
 
-                    return -1;
+                        return -1;
+                    }
+
+                    return 0;
+                }
+            }
+            else if (shadow_header_exists(cf) == CIO_TRUE) {
+                shadow_content_length = get_header_u32(
+                    cf->map, CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET);
+
+                if (shadow_content_length != (uint32_t) content_length &&
+                    recover_shadow_header(ch, cf) == CIO_TRUE) {
+                    return 0;
                 }
             }
 
@@ -1147,15 +1288,6 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
                       old_size, new_size);
     }
 
-    /* If crc_reset was toggled we know that data_size was
-     * modified by cio_chunk_write_at which means we need
-     * to update the header before we recalculate the checksum
-     */
-    if (cf->crc_reset) {
-        cf->taint_flag = CIO_TRUE;
-        cio_file_st_set_content_len(cf->map, cf->data_size);
-    }
-
     if (ch->ctx->options.flags & CIO_CHECKSUM) {
         update_checksum(cf, (unsigned char *) buf, count);
     }
@@ -1166,9 +1298,11 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
     cf->data_size += count;
     cf->synced = CIO_FALSE;
 
-    cio_file_st_set_content_len(cf->map, cf->data_size);
-
     cf->taint_flag = CIO_TRUE;
+
+    if (!(ch->ctx->options.flags & CIO_CHECKSUM)) {
+        cio_file_st_set_content_len(cf->map, cf->data_size);
+    }
 
     return 0;
 }
@@ -1264,6 +1398,7 @@ int cio_file_sync(struct cio_chunk *ch)
     size_t desired_size;
     size_t file_size;
     size_t av_size;
+    uint32_t crc;
     struct cio_file *cf;
 
     if (ch == NULL) {
@@ -1339,12 +1474,16 @@ int cio_file_sync(struct cio_chunk *ch)
         }
     }
 
-    /* Persist the logical length after appends, truncation or rollback. */
-    cio_file_st_set_content_len(cf->map, cf->data_size);
-
     /* Finalize CRC32 checksum */
     if (ch->ctx->options.flags & CIO_CHECKSUM) {
-        finalize_checksum(cf);
+        crc = finalize_checksum_value(cf->crc_cur);
+        write_shadow_header(cf, crc);
+        cio_file_st_set_content_len(cf->map, (uint32_t) cf->data_size);
+        write_checksum(cf, crc);
+    }
+    else {
+        /* Persist the logical length after appends, truncation or rollback. */
+        cio_file_st_set_content_len(cf->map, cf->data_size);
     }
 
     /* Commit changes to disk */
@@ -1451,9 +1590,8 @@ void cio_file_scan_dump(struct cio_ctx *ctx, struct cio_stream *st)
     int ret;
     int meta_len;
     int set_down = CIO_FALSE;
-    char *p;
     crc_t crc;
-    crc_t crc_fs;
+    uint32_t crc_fs;
     char tmp[PATH_MAX];
     struct mk_list *head;
     struct cio_chunk *ch;
@@ -1474,10 +1612,7 @@ void cio_file_scan_dump(struct cio_ctx *ctx, struct cio_stream *st)
         snprintf(tmp, sizeof(tmp) -1, "%s/%s", st->name, ch->name);
         meta_len = cio_file_st_get_meta_len(cf->map);
 
-        p = cio_file_st_get_hash(cf->map);
-
-        memcpy(&crc_fs, p, sizeof(crc_fs));
-        crc_fs = ntohl(crc_fs);
+        crc_fs = get_header_u32(cf->map, 2);
 
         printf("        %-60s", tmp);
 
