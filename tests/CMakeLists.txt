@@ -12,6 +12,7 @@ if(CIO_BACKEND_FILESYSTEM)
     metadata_update.c
     fluent_bit_storage.c
     allocation.c
+    caller_allocation.c
     )
 endif()
 
@@ -60,6 +61,16 @@ foreach(source_file ${UNIT_TESTS_FILES})
       "-Wl,--wrap=mmap"
       "-Wl,--wrap=mremap"
       "-Wl,--wrap=realloc")
+  endif()
+
+  if(source_file STREQUAL "caller_allocation.c" AND
+     CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+     CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_definitions(${source_file_we} PRIVATE CIO_TEST_CALLER_CALLS)
+    target_link_options(${source_file_we} PRIVATE
+      "-Wl,--wrap=cio_file_native_resize"
+      "-Wl,--wrap=cio_file_native_map"
+      "-Wl,--wrap=cio_file_native_remap")
   endif()
 
   if (CIO_SANITIZE_ADDRESS)

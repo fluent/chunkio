@@ -1,5 +1,11 @@
 # Fluent Bit consumer benchmark
 
+These results describe **current Fluent Bit**, which supplies a fixed 256 KiB
+opening hint. The [planned caller-policy comparison](../caller_allocation/README.md)
+separately tests append-sized creation with adaptive growth, using a storage
+lifecycle model based on `flb_input_chunk.c`. That planned behavior is not yet
+implemented in Fluent Bit; the fixed-hint results here are not its final design.
+
 These Linux benchmarks run Fluent Bit's tail input, engine, routing, storage,
 and null/HTTP outputs against two ChunkIO versions. The same Fluent Bit object
 files are linked twice; only the ChunkIO archive differs. No Fluent Bit runtime
