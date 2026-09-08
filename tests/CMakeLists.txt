@@ -10,6 +10,9 @@ if(CIO_BACKEND_FILESYSTEM)
     ${UNIT_TESTS_FILES}
     fs.c
     metadata_update.c
+    fluent_bit_storage.c
+    allocation.c
+    caller_allocation.c
     )
 endif()
 
@@ -36,6 +39,39 @@ foreach(source_file ${UNIT_TESTS_FILES})
     ${source_file}
     )
   target_link_libraries(${source_file_we} chunkio-static)
+
+  # Observe expensive operations without adding instrumentation to the library.
+  if(source_file STREQUAL "fluent_bit_storage.c" AND
+     CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+     CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_definitions(${source_file_we} PRIVATE CIO_TEST_FILE_CALLS)
+    target_link_options(${source_file_we} PRIVATE
+      "-Wl,--wrap=cio_file_native_resize"
+      "-Wl,--wrap=cio_file_native_sync")
+  endif()
+
+  if(source_file STREQUAL "allocation.c" AND
+     CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+     CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_definitions(${source_file_we} PRIVATE CIO_TEST_ALLOCATION_CALLS)
+    target_link_options(${source_file_we} PRIVATE
+      "-Wl,--wrap=cio_file_native_resize"
+      "-Wl,--wrap=cio_file_native_remap"
+      "-Wl,--wrap=cio_file_native_get_size"
+      "-Wl,--wrap=mmap"
+      "-Wl,--wrap=mremap"
+      "-Wl,--wrap=realloc")
+  endif()
+
+  if(source_file STREQUAL "caller_allocation.c" AND
+     CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+     CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_definitions(${source_file_we} PRIVATE CIO_TEST_CALLER_CALLS)
+    target_link_options(${source_file_we} PRIVATE
+      "-Wl,--wrap=cio_file_native_resize"
+      "-Wl,--wrap=cio_file_native_map"
+      "-Wl,--wrap=cio_file_native_remap")
+  endif()
 
   if (CIO_SANITIZE_ADDRESS)
     add_sanitizers(${source_file_we})
