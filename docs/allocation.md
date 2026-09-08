@@ -103,8 +103,16 @@ for configurations, raw results, correctness checks, and limits.
 
 ## Fluent Bit benchmarks
 
+The [planned caller-policy comparison](../tools/benchmarks/caller_allocation/README.md)
+models append-sized creation, reuse according to `flb_input_chunk.c`, and default
+adaptive growth before the policy is ported to Fluent Bit. It compares previous
+ChunkIO, the current 256 KiB hint, and the planned append-sized hint across sparse,
+busy, mixed, large-first-append, and reopen workloads. It is a storage simulation,
+not an already implemented Fluent Bit change.
+
 The [Fluent Bit consumer benchmark](../tools/benchmarks/fluent_bit/README.md) is
-the primary performance comparison. It measures finite-file tail ingestion,
+the performance comparison for the current Fluent Bit integration. It measures
+finite-file tail ingestion,
 many tags, output backpressure, and a memory-storage control. It reports CPU,
 ingestion rate, RSS, and allocated disk space, with exact record-count checks
 and HTTP payload validation during recovery.
