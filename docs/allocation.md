@@ -97,9 +97,19 @@ type check is excluded (`-fno-sanitize=function`); address, leak, and other UB
 checks remain enabled. Tests use `--exec=never` for sanitizer/Valgrind execution.
 The portable Unix mmap replacement path was also forced in an isolated Linux
 source copy and passed all seven suites. This does not establish Windows/macOS
-runtime compatibility. A full Fluent Bit pipeline was not run against this patch.
+runtime compatibility. Full Fluent Bit tail pipelines are now compared against
+the PR base; see the [consumer benchmark](../tools/benchmarks/fluent_bit/README.md)
+for configurations, raw results, correctness checks, and limits.
 
-## Reproducible benchmark
+## Fluent Bit benchmarks
+
+The [Fluent Bit consumer benchmark](../tools/benchmarks/fluent_bit/README.md) is
+the primary performance comparison. It measures finite-file tail ingestion,
+many tags, output backpressure, and a memory-storage control. It reports CPU,
+ingestion rate, RSS, and allocated disk space, with exact record-count checks
+and HTTP payload validation during recovery.
+
+## Supporting allocation microbenchmark
 
 On Linux with GCC or Clang, build a release library and the standalone harness
 without `-DNDEBUG` (the harness checks every operation):
@@ -120,22 +130,7 @@ Arguments are backend, chunk count, bytes per chunk, append batch, opening hint,
 adaptive flag, and checksum flag. The harness verifies payload and metadata
 after down/up. It can also link against the original library for comparison.
 
-Earlier local measurements before moving the patch to upstream master:
-Linux x86-64, ext4/NVMe, GCC 13.3, seven runs per case, medians.
-The original baseline was local commit `fa2f463`; these are not measurements of
-the final PR commit. The growth policies and allocation counts are unchanged.
-Each filesystem chunk has 64 bytes of metadata. Timings include creation,
-writing, normal sync, verification after reload, and deletion; full sync is off.
-
-| Workload | Original | Honor hint, fixed growth | Honor hint, adaptive |
-| --- | ---: | ---: | ---: |
-| 100 FS chunks, 2,048,000 bytes, 1 KiB appends, checksum off | 360.9 ms | 319.3 ms | 119.6 ms |
-| Same, checksum on | 500.0 ms | 462.9 ms | 255.9 ms |
-| Remaps per chunk in these workloads | 63 | 55 | 8 |
-| Final reserved bytes per chunk | 2,068,480 | 2,064,384 | 2,162,688 |
-| 500 FS chunks, one 1 KiB append each, checksum off | 22.5 ms | 43.4 ms | 42.9 ms |
-
-A longer memory-backend check (2,000 chunks, 2,048,000 bytes each, 1 KiB
-appends, fixed growth, nine runs) measured 139.3 ms original and 140.4 ms changed;
-run ranges overlapped. These measurements do not imply an equivalent Fluent Bit
-throughput gain or guarantee identical performance across filesystems/workloads.
+The PR description retains the allocation microbenchmarks as supporting
+diagnostics. Use the consumer measurements above when assessing Fluent Bit
+impact: isolated append/lifecycle timings do not translate directly into
+pipeline throughput, CPU use, or disk footprint.
