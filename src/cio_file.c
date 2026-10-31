@@ -234,7 +234,6 @@ static int recover_shadow_header(struct cio_chunk *ch, struct cio_file *cf)
     int ret;
     size_t metadata_length;
     size_t content_length;
-    ssize_t logical_length;
     crc_t crc;
     uint32_t crc_check;
     uint32_t stored_crc;
@@ -247,8 +246,10 @@ static int recover_shadow_header(struct cio_chunk *ch, struct cio_file *cf)
     content_length = get_header_u32(cf->map,
                                     CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET);
 
-    logical_length = CIO_FILE_HEADER_MIN + metadata_length + content_length;
-    if (logical_length > cf->fs_size) {
+    /* Validate by subtraction so a corrupt length cannot wrap on 32-bit. */
+    if (cf->fs_size < CIO_FILE_HEADER_MIN ||
+        metadata_length > cf->fs_size - CIO_FILE_HEADER_MIN ||
+        content_length > cf->fs_size - CIO_FILE_HEADER_MIN - metadata_length) {
         return CIO_FALSE;
     }
 
@@ -424,7 +425,6 @@ static int cio_file_format_check(struct cio_chunk *ch,
     ssize_t logical_length;
     unsigned char *p;
     uint32_t crc_check;
-    uint32_t shadow_content_length;
     uint32_t stored_crc;
     crc_t crc;
 
@@ -537,15 +537,12 @@ static int cio_file_format_check(struct cio_chunk *ch,
                     return 0;
                 }
             }
-            else if (shadow_header_exists(cf) == CIO_TRUE) {
-                shadow_content_length = get_header_u32(
-                    cf->map, CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET);
-
-                if (shadow_content_length != (uint32_t) content_length &&
-                    recover_shadow_header(ch, cf) == CIO_TRUE) {
-                    return 0;
-                }
-            }
+            /*
+             * A valid primary tuple is authoritative. Older writers leave the
+             * shadow padding untouched, and without a generation marker a
+             * different shadow length cannot establish which tuple is newer.
+             * Recovering it here could discard an append or undo a truncation.
+             */
 
             cf->crc_cur = crc;
         }

@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -1104,7 +1105,7 @@ static void test_fs_shadow_checksum_recovers_primary_length()
     cio_destroy(ctx);
 }
 
-static void test_fs_shadow_checksum_recovers_stale_primary()
+static void test_fs_valid_primary_precedes_newer_shadow()
 {
     int ret;
     int err;
@@ -1149,6 +1150,7 @@ static void test_fs_shadow_checksum_recovers_stale_primary()
     ret = cio_chunk_write(chunk, tail, strlen(tail));
     TEST_CHECK(ret == CIO_OK);
 
+    /* Both tuples validate: without a generation marker the primary wins. */
     cf = (struct cio_file *) chunk->backend;
     cf->crc_cur = cio_crc32_init();
     cio_file_calculate_checksum(cf, &crc);
@@ -1174,12 +1176,140 @@ static void test_fs_shadow_checksum_recovers_stale_primary()
 
     ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
     TEST_CHECK(ret == CIO_OK);
-    TEST_CHECK(out_size == strlen(line) + strlen(tail));
+    TEST_CHECK(out_size == strlen(line));
     TEST_CHECK(memcmp(out_buf, line, strlen(line)) == 0);
-    TEST_CHECK(memcmp(out_buf + strlen(line), tail, strlen(tail)) == 0);
     free(out_buf);
 
     cio_destroy(ctx);
+}
+
+/* Older writers update the primary tuple but leave shadow padding untouched. */
+static void check_stale_shadow_after_legacy_write(int truncate, int read_only)
+{
+    int ret;
+    int err;
+    char *out_buf;
+    size_t out_size;
+    size_t expected_size;
+    unsigned char shadow[8];
+    unsigned char header[CIO_FILE_HEADER_MIN];
+    struct cio_options opts;
+    struct cio_ctx *ctx;
+    struct cio_stream *stream;
+    struct cio_chunk *chunk;
+    struct cio_file *cf;
+    char head[] = "original records\n";
+    char tail[] = "appended records\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+    cio_options_init(&opts);
+    opts.root_path = CIO_ENV;
+    opts.flags = CIO_CHECKSUM;
+    ctx = cio_create(&opts);
+    if (!TEST_CHECK(ctx != NULL)) {
+        exit(1);
+    }
+    stream = cio_stream_create(ctx, "legacy_writer", CIO_STORE_FS);
+    if (!TEST_CHECK(stream != NULL)) {
+        exit(1);
+    }
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    if (!TEST_CHECK(chunk != NULL)) {
+        exit(1);
+    }
+    ret = cio_chunk_write(chunk, head, strlen(head));
+    if (!TEST_CHECK(ret == CIO_OK)) {
+        exit(1);
+    }
+    if (truncate) {
+        ret = cio_chunk_write(chunk, tail, strlen(tail));
+        if (!TEST_CHECK(ret == CIO_OK)) {
+            exit(1);
+        }
+    }
+    ret = cio_chunk_sync(chunk);
+    if (!TEST_CHECK(ret == CIO_OK)) {
+        exit(1);
+    }
+    cf = chunk->backend;
+    memcpy(shadow, cf->map + CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET, sizeof(shadow));
+
+    if (truncate) {
+        ret = cio_chunk_write_at(chunk, strlen(head), NULL, 0);
+        expected_size = strlen(head);
+    }
+    else {
+        ret = cio_chunk_write(chunk, tail, strlen(tail));
+        expected_size = strlen(head) + strlen(tail);
+    }
+    if (!TEST_CHECK(ret == CIO_OK)) {
+        exit(1);
+    }
+    ret = cio_chunk_sync(chunk);
+    if (!TEST_CHECK(ret == CIO_OK)) {
+        exit(1);
+    }
+
+    /* Reproduce an old writer's valid primary with the previous shadow tuple. */
+    memcpy(cf->map + CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET, shadow, sizeof(shadow));
+    memcpy(header, cf->map, sizeof(header));
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    if (!TEST_CHECK(ret == CIO_OK)) {
+        exit(1);
+    }
+    cio_destroy(ctx);
+
+    cio_options_init(&opts);
+    opts.root_path = CIO_ENV;
+    opts.flags = CIO_CHECKSUM | (read_only ? CIO_OPEN_RD : 0);
+    ctx = cio_create(&opts);
+    if (!TEST_CHECK(ctx != NULL)) {
+        exit(1);
+    }
+    stream = cio_stream_create(ctx, "legacy_writer", CIO_STORE_FS);
+    if (!TEST_CHECK(stream != NULL)) {
+        exit(1);
+    }
+    chunk = cio_chunk_open(ctx, stream, "test",
+                           read_only ? CIO_OPEN_RD : CIO_OPEN, 0, &err);
+    if (!TEST_CHECK(chunk != NULL)) {
+        exit(1);
+    }
+    cf = chunk->backend;
+    TEST_CHECK(memcmp(cf->map, header, sizeof(header)) == 0);
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    if (!TEST_CHECK(ret == CIO_OK)) {
+        exit(1);
+    }
+    TEST_CHECK(out_size == expected_size);
+    if (out_size == expected_size) {
+        TEST_CHECK(memcmp(out_buf, head, strlen(head)) == 0);
+        if (!truncate) {
+            TEST_CHECK(memcmp(out_buf + strlen(head), tail, strlen(tail)) == 0);
+        }
+    }
+    free(out_buf);
+    cio_destroy(ctx);
+}
+
+static void test_fs_valid_primary_with_stale_shadow_append()
+{
+    check_stale_shadow_after_legacy_write(CIO_FALSE, CIO_FALSE);
+}
+
+static void test_fs_valid_primary_with_stale_shadow_truncate()
+{
+    check_stale_shadow_after_legacy_write(CIO_TRUE, CIO_FALSE);
+}
+
+static void test_fs_valid_primary_with_stale_shadow_read_only_append()
+{
+    check_stale_shadow_after_legacy_write(CIO_FALSE, CIO_TRUE);
+}
+
+static void test_fs_valid_primary_with_stale_shadow_read_only_truncate()
+{
+    check_stale_shadow_after_legacy_write(CIO_TRUE, CIO_TRUE);
 }
 
 static void test_fs_write_at_zero_truncates_synced_checksum()
@@ -1456,7 +1586,7 @@ static void test_fs_old_format_loads_via_restart()
  * file: a corrupted primary CRC combined with an oversized shadow length must
  * surface as CIO_CORRUPTED, never a silent accept of out-of-bounds content.
  */
-static void test_fs_shadow_rejects_oversized_length()
+static void check_shadow_rejects_oversized_length(int maximum_length)
 {
     int ret;
     int err;
@@ -1502,7 +1632,14 @@ static void test_fs_shadow_rejects_oversized_length()
 
     /* Make the shadow content length larger than the file */
     set_test_header_u32(cf->map, CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET,
-                        (uint32_t) (cf->fs_size + 4096));
+                        maximum_length ? UINT32_MAX : (uint32_t) (cf->fs_size + 4096));
+    if (maximum_length) {
+        /* On 32-bit size_t, UINT32_MAX + the two metadata bytes wraps to 1. */
+        set_test_header_u32(cf->map, CIO_FILE_SHADOW_HASH_OFFSET,
+                            (uint32_t) cio_crc32_finalize(cio_crc32_update(
+                                cio_crc32_init(),
+                                cf->map + CIO_FILE_CONTENT_OFFSET, 1)));
+    }
 
     ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
     TEST_CHECK(ret == CIO_OK);
@@ -1518,6 +1655,16 @@ static void test_fs_shadow_rejects_oversized_length()
     TEST_CHECK(cf->map == NULL);
 
     cio_destroy(ctx);
+}
+
+static void test_fs_shadow_rejects_oversized_length()
+{
+    check_shadow_rejects_oversized_length(CIO_FALSE);
+}
+
+static void test_fs_shadow_rejects_maximum_length()
+{
+    check_shadow_rejects_oversized_length(CIO_TRUE);
 }
 
 /*
@@ -2876,11 +3023,16 @@ TEST_LIST = {
     {"fs_shadow_checksum_recovers_primary_header", test_fs_shadow_checksum_recovers_primary_header},
     {"fs_shadow_checksum_recovers_read_only", test_fs_shadow_checksum_recovers_read_only},
     {"fs_shadow_checksum_recovers_primary_length", test_fs_shadow_checksum_recovers_primary_length},
-    {"fs_shadow_checksum_recovers_stale_primary", test_fs_shadow_checksum_recovers_stale_primary},
+    {"fs_valid_primary_precedes_newer_shadow", test_fs_valid_primary_precedes_newer_shadow},
+    {"fs_valid_primary_with_stale_shadow_read_only_truncate", test_fs_valid_primary_with_stale_shadow_read_only_truncate},
+    {"fs_valid_primary_with_stale_shadow_read_only_append", test_fs_valid_primary_with_stale_shadow_read_only_append},
+    {"fs_valid_primary_with_stale_shadow_truncate", test_fs_valid_primary_with_stale_shadow_truncate},
+    {"fs_valid_primary_with_stale_shadow_append", test_fs_valid_primary_with_stale_shadow_append},
     {"fs_write_at_zero_truncates_synced_checksum", test_fs_write_at_zero_truncates_synced_checksum},
     {"fs_legacy_checksum_without_shadow_header", test_fs_legacy_checksum_without_shadow_header},
     {"fs_old_format_loads_via_restart", test_fs_old_format_loads_via_restart},
     {"fs_shadow_rejects_oversized_length", test_fs_shadow_rejects_oversized_length},
+    {"fs_shadow_rejects_maximum_length", test_fs_shadow_rejects_maximum_length},
     {"fs_shadow_rejects_corrupt_content", test_fs_shadow_rejects_corrupt_content},
     {"fs_shadow_rejects_both_tuples_corrupt", test_fs_shadow_rejects_both_tuples_corrupt},
     {"fs_format_contract_new_chunk_layout", test_fs_format_contract_new_chunk_layout},
