@@ -17,7 +17,7 @@ jobs:
       matrix:
         os: [windows-2025, windows-2022]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v7
       - name: Set up with Developer Command Prompt for Microsoft Visual C++
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -39,7 +39,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         compiler: [ gcc, clang ]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v7
       - name: Build on ${{ matrix.os }} with ${{ matrix.compiler }}
         run: |
           echo "CC = $CC, CXX = $CXX"
