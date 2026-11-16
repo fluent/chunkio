@@ -88,6 +88,27 @@ static inline crc_t crc_init(void)
 crc_t crc_update(crc_t crc, const void *data, size_t data_len);
 
 
+/* Patch by Fluent Bit Authors */
+
+/**
+ * crc_update() picks a hardware accelerated kernel at runtime when the CPU
+ * has one (see crc32_dispatch.c). All kernels return the same value.
+ */
+#define CRC_ALGO_RUNTIME_DISPATCH 1
+
+/**
+ * Update the crc value with new data using the portable table-driven code,
+ * regardless of what the CPU supports. Same contract as crc_update().
+ */
+crc_t crc_update_table(crc_t crc, const void *data, size_t data_len);
+
+/**
+ * Name of the kernel crc_update() runs on this machine: "table", "pclmul",
+ * "avx512-vpclmulqdq", "armv8-crc32" or "armv8-crc32-pmull".
+ */
+const char *crc_backend(void);
+
+
 /**
  * Calculate the final crc value.
  *
