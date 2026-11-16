@@ -48,21 +48,6 @@ static void fill_buffer(void)
     }
 }
 
-/*
- * On big-endian targets the table code in deps/crc32 has never produced the
- * standard CRC-32: its 8-byte block step mangles the running value, and the
- * result even depends on how the data is aligned and split. That predates
- * the accelerated kernels, which only exist for little-endian targets, and
- * fixing it changes what those systems store. Until that is decided, a
- * big-endian run only checks that crc_update() is the table code.
- */
-static int is_little_endian(void)
-{
-    const uint32_t probe = 1;
-
-    return *(const unsigned char *) &probe == 1;
-}
-
 /* One bit at a time: shares no code and no tables with the library */
 static crc_t crc_reference(crc_t crc, const unsigned char *data, size_t len)
 {
@@ -97,12 +82,6 @@ static void test_known_values(void)
     char letters[1041];
 
     printf("crc32 backend: %s\n", crc_backend());
-
-    if (!is_little_endian()) {
-        printf("big-endian: skipping standard CRC-32 values\n");
-        TEST_CHECK(strcmp(crc_backend(), "table") == 0);
-        return;
-    }
 
     TEST_CHECK(crc_of("") == 0x00000000);
     TEST_CHECK(crc_of("a") == 0xe8b7be43);
@@ -143,9 +122,6 @@ static void test_matches_reference(void)
         for (offset = 0; offset < 16; offset++) {
             state = (len + offset) % 3 == 0 ? cio_crc32_init() : next_random();
             expect = crc_reference(state, buf + offset, len);
-            if (!is_little_endian()) {
-                expect = crc_update_table(state, buf + offset, len);
-            }
 
             if (!TEST_CHECK(cio_crc32_update(state, buf + offset, len) ==
                             expect)) {
@@ -165,13 +141,9 @@ static void test_matches_reference(void)
         len = next_random() % BUF_SIZE;
         offset = next_random() % BUF_SLACK;
         state = next_random();
-        expect = crc_reference(state, buf + offset, len);
-        if (!is_little_endian()) {
-            expect = crc_update_table(state, buf + offset, len);
-        }
 
         if (!TEST_CHECK(cio_crc32_update(state, buf + offset, len) ==
-                        expect)) {
+                        crc_reference(state, buf + offset, len))) {
             TEST_MSG("len=%zu offset=%zu", len, offset);
             return;
         }
@@ -187,11 +159,6 @@ static void test_incremental(void)
     size_t step;
     crc_t whole;
     crc_t pieces;
-
-    if (!is_little_endian()) {
-        printf("big-endian: skipping, see is_little_endian()\n");
-        return;
-    }
 
     fill_buffer();
 
@@ -215,9 +182,58 @@ static void test_incremental(void)
     }
 }
 
+/*
+ * Big-endian builds used to compute something else than CRC-32. Chunks they
+ * wrote are still recognized through crc_update_legacy_big_endian(), which
+ * has to keep returning what those builds returned. The expected values were
+ * captured from crc_update() of ChunkIO v1.5.5 on s390x, for this same data
+ * at these offsets from an 8-byte aligned address.
+ */
+static void test_legacy_big_endian(void)
+{
+    static const struct {
+        size_t offset;
+        size_t len;
+        uint32_t expect;
+    } cases[] = {
+        {0,    9, 0x49da06cd}, {0,  100, 0x17bb712a}, {0, 1000, 0x639ecd36},
+        {3,    9, 0xcad326cd}, {3,  100, 0x9ecfe048}, {3, 1000, 0xa6eb6276},
+        {5,    9, 0x5e2989dc}, {5,  100, 0x23341c19}, {5, 1000, 0xc1184f28}
+    };
+    static union {
+        uint64_t align;
+        unsigned char bytes[1024];
+    } data;
+    size_t i;
+    uint32_t value = 0x1234abcd;
+    crc_t crc;
+
+    for (i = 0; i < sizeof(data.bytes); i++) {
+        value ^= value << 13;
+        value ^= value >> 17;
+        value ^= value << 5;
+        data.bytes[i] = (unsigned char) (value >> 16);
+    }
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        crc = crc_update_legacy_big_endian(cio_crc32_init(),
+                                           data.bytes + cases[i].offset,
+                                           cases[i].len);
+        if (!TEST_CHECK((uint32_t) crc == cases[i].expect)) {
+            TEST_MSG("offset=%zu len=%zu got=%08x", cases[i].offset,
+                     cases[i].len, (uint32_t) crc);
+        }
+    }
+
+    /* Shorter than one 8-byte step it is the plain CRC-32 */
+    crc = crc_update_legacy_big_endian(cio_crc32_init(), "1234567", 7);
+    TEST_CHECK((uint32_t) cio_crc32_finalize(crc) == 0x5003699f);
+}
+
 TEST_LIST = {
     {"known_values",      test_known_values},
     {"matches_reference", test_matches_reference},
     {"incremental",       test_incremental},
+    {"legacy_big_endian", test_legacy_big_endian},
     {NULL, NULL}
 };
