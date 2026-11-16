@@ -227,6 +227,19 @@ static void test_fs_write()
  * Create one file chunk and check it updated sha1 after a couple of writes
  * and sync.
  */
+/*
+ * The expected checksums below are spelled as the bytes of the value in
+ * little-endian order; turn them into a number so the comparison does not
+ * depend on the byte order of the host.
+ */
+static uint32_t expected_crc32(const char *bytes)
+{
+    const unsigned char *b = (const unsigned char *) bytes;
+
+    return ((uint32_t) b[0]) | ((uint32_t) b[1] << 8) |
+           ((uint32_t) b[2] << 16) | ((uint32_t) b[3] << 24);
+}
+
 static void test_fs_checksum()
 {
     int ret;
@@ -307,8 +320,7 @@ static void test_fs_checksum()
     memcpy(&val, f_hash, sizeof(val));
     val = ntohl(val);
 
-    ret = memcmp(&val, crc32_test1, 4);
-    TEST_CHECK(ret == 0);
+    TEST_CHECK(val == expected_crc32(crc32_test1));
 
     /*
      * Test 2:
@@ -327,8 +339,7 @@ static void test_fs_checksum()
     memcpy(&val, f_hash, sizeof(val));
     val = ntohl(val);
 
-    ret = memcmp(&val, crc32_test2, 4);
-    TEST_CHECK(ret == 0);
+    TEST_CHECK(val == expected_crc32(crc32_test2));
 
     /* Release */
     cio_destroy(ctx);
@@ -432,8 +443,7 @@ static void test_fs_up_down()
     memcpy(&val, f_hash, sizeof(val));
     val = ntohl(val);
 
-    ret = memcmp(&val, crc32_test1, 4);
-    TEST_CHECK(ret == 0);
+    TEST_CHECK(val == expected_crc32(crc32_test1));
 
     /*
      * Test 2:
@@ -472,8 +482,7 @@ static void test_fs_up_down()
     memcpy(&val, f_hash, sizeof(val));
     val = ntohl(val);
 
-    ret = memcmp(&val, crc32_test2, 4);
-    TEST_CHECK(ret == 0);
+    TEST_CHECK(val == expected_crc32(crc32_test2));
 
     /* Release */
     cio_destroy(ctx);
