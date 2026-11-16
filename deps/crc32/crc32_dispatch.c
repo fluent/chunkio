@@ -41,11 +41,21 @@ typedef crc_t (*crc_update_fn)(crc_t crc, const void *data, size_t data_len);
 static crc_t crc_update_resolve(crc_t crc, const void *data, size_t data_len);
 
 /*
- * Concurrent first calls may all run the resolver; they store the same two
- * values, so the outcome does not depend on who wins.
+ * Concurrent first calls may all run the resolver; they all store the same
+ * pointer, so the outcome does not depend on who wins. The accesses are
+ * atomic so that is not a data race; a relaxed load costs the same as a plain
+ * one. MSVC has no such builtin, there an aligned pointer access is atomic
+ * on every supported target.
  */
 static crc_update_fn crc_update_ptr = crc_update_resolve;
-static const char *crc_backend_name = "table";
+
+#if defined(__GNUC__) || defined(__clang__)
+#define crc_ptr_load()    __atomic_load_n(&crc_update_ptr, __ATOMIC_RELAXED)
+#define crc_ptr_store(fn) __atomic_store_n(&crc_update_ptr, fn, __ATOMIC_RELAXED)
+#else
+#define crc_ptr_load()    (crc_update_ptr)
+#define crc_ptr_store(fn) (crc_update_ptr = (fn))
+#endif
 
 #if defined(CRC32_SIMD_SSE42_PCLMUL)
 
@@ -267,20 +277,17 @@ static int crc_self_test(crc_update_fn fn)
 static crc_t crc_update_resolve(crc_t crc, const void *data, size_t data_len)
 {
     crc_update_fn fn = crc_update_table;
-    const char *name = "table";
 
 #if defined(CRC32_SIMD_SSE42_PCLMUL)
     int features = x86_features();
 
     if (features & X86_PCLMUL) {
         fn = crc_update_pclmul;
-        name = "pclmul";
     }
 
 #if defined(CRC32_SIMD_AVX512_PCLMUL)
     if (features & X86_AVX512) {
         fn = crc_update_avx512;
-        name = "avx512-vpclmulqdq";
     }
 #endif
 
@@ -289,11 +296,9 @@ static crc_t crc_update_resolve(crc_t crc, const void *data, size_t data_len)
 
     if (features & ARM_CRC32) {
         fn = crc_update_armv8;
-        name = "armv8-crc32";
 
         if (features & ARM_PMULL) {
             fn = crc_update_armv8_pmull;
-            name = "armv8-crc32-pmull";
         }
     }
 #endif
@@ -301,26 +306,47 @@ static crc_t crc_update_resolve(crc_t crc, const void *data, size_t data_len)
 #ifdef CRC_HAVE_SIMD
     if (fn != crc_update_table && !crc_self_test(fn)) {
         fn = crc_update_table;
-        name = "table";
     }
 #endif
 
-    crc_backend_name = name;
-    crc_update_ptr = fn;
+    crc_ptr_store(fn);
 
     return fn(crc, data, data_len);
 }
 
 crc_t crc_update(crc_t crc, const void *data, size_t data_len)
 {
-    return crc_update_ptr(crc, data, data_len);
+    crc_update_fn fn = crc_ptr_load();
+
+    return fn(crc, data, data_len);
 }
 
 const char *crc_backend(void)
 {
-    if (crc_update_ptr == crc_update_resolve) {
+    crc_update_fn fn = crc_ptr_load();
+
+    if (fn == crc_update_resolve) {
         crc_update(crc_init(), NULL, 0);
+        fn = crc_ptr_load();
     }
 
-    return crc_backend_name;
+#if defined(CRC32_SIMD_SSE42_PCLMUL)
+    if (fn == crc_update_pclmul) {
+        return "pclmul";
+    }
+#if defined(CRC32_SIMD_AVX512_PCLMUL)
+    if (fn == crc_update_avx512) {
+        return "avx512-vpclmulqdq";
+    }
+#endif
+#elif defined(CRC32_ARMV8_CRC32)
+    if (fn == crc_update_armv8) {
+        return "armv8-crc32";
+    }
+    if (fn == crc_update_armv8_pmull) {
+        return "armv8-crc32-pmull";
+    }
+#endif
+
+    return "table";
 }
