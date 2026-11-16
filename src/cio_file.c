@@ -355,6 +355,96 @@ static int recover_legacy_wide_checksum(struct cio_chunk *ch,
     return CIO_TRUE;
 }
 
+static int host_is_big_endian(void)
+{
+    const uint32_t probe = 1;
+
+    return *(const unsigned char *) &probe == 0;
+}
+
+/*
+ * Big-endian builds used to compute a value that is not the standard CRC-32
+ * (see crc_update_legacy_big_endian()). That value depended on how the data
+ * was aligned in memory, so for most chunks the checksum accumulated across
+ * appends did not match the one recomputed here over the map, and the chunk
+ * was already rejected. Chunks that did match were accepted, and must keep
+ * loading now that the checksum is the standard one.
+ *
+ * Reproduce what those builds verified: one pass of the old function over
+ * the mapped content, compared with the stored value in each layout they
+ * used. The content sits at the same offset of a page aligned map as it did
+ * then, so the old function returns what it returned then.
+ *
+ *  - finalized, 4 bytes at offset 2 (portable layout)
+ *  - finalized, 8 bytes at offset 2 with the value in the last 4 (LP64)
+ *  - not finalized, raw crc_t at offset 2
+ *
+ * When matched the chunk is accepted and, if writable, its checksum is
+ * rewritten as the standard CRC-32 in the portable layout.
+ */
+static int recover_legacy_big_endian_checksum(struct cio_chunk *ch,
+                                              struct cio_file *cf,
+                                              unsigned char *hash,
+                                              crc_t crc)
+{
+    int ret;
+    size_t len;
+    crc_t legacy_crc;
+    uint32_t legacy_check;
+    unsigned char *in_data;
+
+    if (!host_is_big_endian()) {
+        return CIO_FALSE;
+    }
+
+    /* Same span as calculate_checksum_len() */
+    len  = 2;
+    len += cio_file_st_get_meta_len(cf->map);
+    len += cf->data_size;
+
+    in_data = (unsigned char *) cf->map + CIO_FILE_CONTENT_OFFSET;
+
+    legacy_crc = crc_update_legacy_big_endian(cio_crc32_init(), in_data, len);
+    legacy_check = finalize_checksum_value(legacy_crc);
+
+    if (get_header_u32(cf->map, 2) != legacy_check &&
+        !(get_header_u32(cf->map, 2) == 0 && legacy_check != 0 &&
+          get_header_u32(cf->map, CIO_FILE_LEGACY_CRC_PADDING_OFFSET) ==
+          legacy_check) &&
+        memcmp(hash, &legacy_crc, sizeof(legacy_crc)) != 0) {
+        return CIO_FALSE;
+    }
+
+    /* From here on the chunk carries the standard checksum */
+    cf->crc_cur = crc;
+
+    if (!(cf->flags & CIO_OPEN_RW)) {
+        cio_log_info(ch->ctx,
+                     "[cio file] accepted legacy big-endian crc32 value at "
+                     "%s/%s (read-only)", ch->name, cf->path);
+
+        return CIO_TRUE;
+    }
+
+    finalize_checksum(cf);
+    cf->synced = CIO_FALSE;
+
+    ret = cio_file_native_sync(cf, CIO_FULL_SYNC);
+    if (ret == CIO_OK) {
+        cf->synced = CIO_TRUE;
+        cio_log_info(ch->ctx,
+                     "[cio file] migrated legacy big-endian crc32 value at "
+                     "%s/%s", ch->name, cf->path);
+    }
+    else {
+        cio_log_warn(ch->ctx,
+                     "[cio file] could not persist migrated crc32 at %s/%s",
+                     ch->name, cf->path);
+    }
+
+    return CIO_TRUE;
+}
+
 /*
  * adjust_layout: if metadata has changed, we need to adjust the content
  * data and reference pointers.
@@ -524,6 +614,11 @@ static int cio_file_format_check(struct cio_chunk *ch,
                     if (ret == CIO_FALSE) {
                         ret = recover_legacy_wide_checksum(ch, cf, crc,
                                                            crc_check);
+                    }
+
+                    if (ret == CIO_FALSE) {
+                        ret = recover_legacy_big_endian_checksum(ch, cf, p,
+                                                                 crc);
                     }
 
                     if (ret == CIO_FALSE) {
