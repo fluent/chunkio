@@ -27,6 +27,9 @@
 #include <limits.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <unistd.h>
 
 #include <chunkio/chunkio.h>
 #include <chunkio/cio_log.h>
@@ -1128,6 +1131,7 @@ static void test_fs_valid_primary_precedes_newer_shadow()
     struct cio_options cio_opts;
     char line[] = "shadow checksum payload\n";
     char tail[] = "after recovery\n";
+    char header[CIO_FILE_HEADER_MIN];
 
     cio_utils_recursive_delete(CIO_ENV);
 
@@ -1156,11 +1160,17 @@ static void test_fs_valid_primary_precedes_newer_shadow()
     ret = cio_chunk_sync(chunk);
     TEST_CHECK(ret == CIO_OK);
 
+    /* Appends publish both tuples, keep the primary one of the first write */
+    cf = (struct cio_file *) chunk->backend;
+    memcpy(header, cf->map, sizeof(header));
+
     ret = cio_chunk_write(chunk, tail, strlen(tail));
     TEST_CHECK(ret == CIO_OK);
 
-    /* Both tuples validate: without a generation marker the primary wins. */
     cf = (struct cio_file *) chunk->backend;
+    memcpy(cf->map, header, sizeof(header));
+
+    /* Both tuples validate: without a generation marker the primary wins. */
     cf->crc_cur = cio_crc32_init();
     cio_file_calculate_checksum(cf, &crc);
     cf->crc_cur = crc;
@@ -1191,6 +1201,226 @@ static void test_fs_valid_primary_precedes_newer_shadow()
 
     cio_destroy(ctx);
 }
+
+static void check_checksum_header(struct cio_chunk *chunk)
+{
+    crc_t crc;
+    crc_t saved;
+    uint32_t expected;
+    struct cio_file *cf;
+
+    cf = (struct cio_file *) chunk->backend;
+
+    /* Compute the checksum from the mapped bytes, not from the running state */
+    saved = cf->crc_cur;
+    cf->crc_cur = cio_crc32_init();
+    cio_file_calculate_checksum(cf, &crc);
+    cf->crc_cur = saved;
+
+    expected = (uint32_t) cio_crc32_finalize(crc);
+
+    TEST_CHECK(get_test_header_u32(cf->map, 2) == expected);
+    TEST_CHECK(get_test_header_u32(cf->map, CIO_FILE_CONTENT_LENGTH_OFFSET) ==
+               (uint32_t) cf->data_size);
+    TEST_CHECK(get_test_header_u32(cf->map, CIO_FILE_SHADOW_HASH_OFFSET) ==
+               expected);
+    TEST_CHECK(get_test_header_u32(cf->map,
+                                   CIO_FILE_SHADOW_CONTENT_LENGTH_OFFSET) ==
+               (uint32_t) cf->data_size);
+}
+
+/* The header must describe the content after every change, without a sync */
+static void test_fs_checksum_header_follows_writes()
+{
+    int ret;
+    int err;
+    struct cio_ctx *ctx;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char meta[] = "tag.one";
+    char meta_long[] = "a.much.longer.tag.name";
+    char line[] = "checksum header payload\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = CIO_CHECKSUM;
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_header_writes", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        exit(1);
+    }
+
+    ret = cio_meta_write(chunk, meta, sizeof(meta) - 1);
+    TEST_CHECK(ret == CIO_OK);
+    check_checksum_header(chunk);
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+    check_checksum_header(chunk);
+
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+    check_checksum_header(chunk);
+
+    /* Metadata that moves the content */
+    ret = cio_meta_write(chunk, meta_long, sizeof(meta_long) - 1);
+    TEST_CHECK(ret == CIO_OK);
+    check_checksum_header(chunk);
+
+    /* Overwrite the second record, then drop everything */
+    ret = cio_chunk_write_at(chunk, strlen(line), line, strlen(line) - 4);
+    TEST_CHECK(ret == CIO_OK);
+    check_checksum_header(chunk);
+
+    ret = cio_chunk_write_at(chunk, 0, NULL, 0);
+    TEST_CHECK(ret == CIO_OK);
+    check_checksum_header(chunk);
+
+    cio_destroy(ctx);
+}
+
+#ifndef __EMSCRIPTEN__
+/*
+ * A process that is killed while it appends never syncs the chunk. Its
+ * content stays in the page cache, so the next process must be able to load
+ * every record that was appended.
+ */
+static void check_killed_writer(int flags)
+{
+    int i;
+    int ret;
+    int err;
+    int status;
+    int records = 100;
+    int meta_len;
+    pid_t pid;
+    char *meta_buf;
+    char *out_buf;
+    size_t out_size;
+    struct cio_ctx *ctx;
+    struct cio_chunk *chunk;
+    struct cio_stream *stream;
+    struct cio_options cio_opts;
+    char meta[] = "killed.writer";
+    char line[] = "record appended by a process that gets killed\n";
+
+    cio_utils_recursive_delete(CIO_ENV);
+
+    cio_options_init(&cio_opts);
+
+    cio_opts.root_path = CIO_ENV;
+    cio_opts.log_cb = log_cb;
+    cio_opts.log_level = CIO_LOG_INFO;
+    cio_opts.flags = flags;
+
+    pid = fork();
+    TEST_CHECK(pid >= 0);
+    if (pid < 0) {
+        return;
+    }
+
+    if (pid == 0) {
+        ctx = cio_create(&cio_opts);
+        if (!ctx) {
+            _exit(1);
+        }
+
+        stream = cio_stream_create(ctx, "test_killed_writer", CIO_STORE_FS);
+        if (!stream) {
+            _exit(1);
+        }
+
+        chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+        if (!chunk) {
+            _exit(1);
+        }
+
+        ret = cio_meta_write(chunk, meta, sizeof(meta) - 1);
+        if (ret != CIO_OK) {
+            _exit(1);
+        }
+
+        for (i = 0; i < records; i++) {
+            ret = cio_chunk_write(chunk, line, strlen(line));
+            if (ret != CIO_OK) {
+                _exit(1);
+            }
+        }
+
+        /* No sync, no down, no close */
+        kill(getpid(), SIGKILL);
+        _exit(1);
+    }
+
+    ret = waitpid(pid, &status, 0);
+    TEST_CHECK(ret == pid);
+    TEST_CHECK(WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
+
+    ctx = cio_create(&cio_opts);
+    TEST_CHECK(ctx != NULL);
+
+    stream = cio_stream_create(ctx, "test_killed_writer", CIO_STORE_FS);
+    TEST_CHECK(stream != NULL);
+
+    chunk = cio_chunk_open(ctx, stream, "test", CIO_OPEN, 1000, &err);
+    TEST_CHECK(chunk != NULL);
+    if (!chunk) {
+        cio_destroy(ctx);
+        return;
+    }
+
+    ret = cio_meta_read(chunk, &meta_buf, &meta_len);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(meta_len == sizeof(meta) - 1);
+    TEST_CHECK(memcmp(meta_buf, meta, sizeof(meta) - 1) == 0);
+
+    ret = cio_chunk_get_content_copy(chunk, (void **) &out_buf, &out_size);
+    TEST_CHECK(ret == CIO_OK);
+    TEST_CHECK(out_size == strlen(line) * records);
+    if (ret == CIO_OK) {
+        for (i = 0; i < records && out_size == strlen(line) * records; i++) {
+            TEST_CHECK(memcmp(out_buf + (i * strlen(line)), line,
+                              strlen(line)) == 0);
+        }
+        free(out_buf);
+    }
+
+    /* The recovered chunk keeps accepting data */
+    ret = cio_chunk_write(chunk, line, strlen(line));
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_down(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    ret = cio_chunk_up(chunk);
+    TEST_CHECK(ret == CIO_OK);
+
+    cio_destroy(ctx);
+}
+
+static void test_fs_checksum_killed_writer()
+{
+    check_killed_writer(CIO_CHECKSUM);
+}
+
+static void test_fs_killed_writer()
+{
+    check_killed_writer(0);
+}
+#endif
 
 /* Older writers update the primary tuple but leave shadow padding untouched. */
 static void check_stale_shadow_after_legacy_write(int truncate, int read_only)
@@ -3033,6 +3263,11 @@ TEST_LIST = {
     {"fs_shadow_checksum_recovers_read_only", test_fs_shadow_checksum_recovers_read_only},
     {"fs_shadow_checksum_recovers_primary_length", test_fs_shadow_checksum_recovers_primary_length},
     {"fs_valid_primary_precedes_newer_shadow", test_fs_valid_primary_precedes_newer_shadow},
+    {"fs_checksum_header_follows_writes", test_fs_checksum_header_follows_writes},
+#ifndef __EMSCRIPTEN__
+    {"fs_checksum_killed_writer", test_fs_checksum_killed_writer},
+    {"fs_killed_writer", test_fs_killed_writer},
+#endif
     {"fs_valid_primary_with_stale_shadow_read_only_truncate", test_fs_valid_primary_with_stale_shadow_read_only_truncate},
     {"fs_valid_primary_with_stale_shadow_read_only_append", test_fs_valid_primary_with_stale_shadow_read_only_append},
     {"fs_valid_primary_with_stale_shadow_truncate", test_fs_valid_primary_with_stale_shadow_truncate},
