@@ -181,6 +181,26 @@ static void write_shadow_header(struct cio_file *cf, uint32_t crc)
     set_header_u32(cf->map, CIO_FILE_SHADOW_HASH_OFFSET, crc);
 }
 
+/*
+ * Publish the current content length and checksum in the header.
+ *
+ * The map is shared with the page cache, so what is stored here survives the
+ * end of the process even when no sync was issued. The shadow tuple goes
+ * first: if the process stops between the two updates the primary tuple still
+ * describes the previous content, and if it stops in the middle of the primary
+ * update the loader falls back to the shadow one.
+ */
+static void write_checksum_header(struct cio_file *cf)
+{
+    uint32_t crc;
+
+    crc = finalize_checksum_value(cf->crc_cur);
+
+    write_shadow_header(cf, crc);
+    cio_file_st_set_content_len(cf->map, (uint32_t) cf->data_size);
+    write_checksum(cf, crc);
+}
+
 static int recover_unfinalized_checksum(struct cio_chunk *ch,
                                         struct cio_file *cf,
                                         unsigned char *hash,
@@ -459,6 +479,7 @@ static int adjust_layout(struct cio_chunk *ch,
         /* reset current crc since we are calculating from zero */
         cf->crc_cur = cio_crc32_init();
         cio_file_calculate_checksum(cf, &cf->crc_cur);
+        write_checksum_header(cf);
     }
 
     /* Sync changes to disk */
@@ -1405,7 +1426,10 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
             cf->synced = CIO_FALSE;
             cf->taint_flag = CIO_TRUE;
 
-            if (!(ch->ctx->options.flags & CIO_CHECKSUM)) {
+            if (ch->ctx->options.flags & CIO_CHECKSUM) {
+                write_checksum_header(cf);
+            }
+            else {
                 cio_file_st_set_content_len(cf->map, cf->data_size);
             }
         }
@@ -1470,7 +1494,16 @@ int cio_file_write(struct cio_chunk *ch, const void *buf, size_t count)
 
     cf->taint_flag = CIO_TRUE;
 
-    if (!(ch->ctx->options.flags & CIO_CHECKSUM)) {
+    /*
+     * Keep the header current on every append. A chunk that is being written
+     * is not synced until it goes down or gets locked, and a process that
+     * stops before that point must not leave a header that no longer matches
+     * the content.
+     */
+    if (ch->ctx->options.flags & CIO_CHECKSUM) {
+        write_checksum_header(cf);
+    }
+    else {
         cio_file_st_set_content_len(cf->map, cf->data_size);
     }
 
@@ -1568,7 +1601,6 @@ int cio_file_sync(struct cio_chunk *ch)
     size_t desired_size;
     size_t file_size;
     size_t av_size;
-    uint32_t crc;
     struct cio_file *cf;
 
     if (ch == NULL) {
@@ -1646,10 +1678,7 @@ int cio_file_sync(struct cio_chunk *ch)
 
     /* Finalize CRC32 checksum */
     if (ch->ctx->options.flags & CIO_CHECKSUM) {
-        crc = finalize_checksum_value(cf->crc_cur);
-        write_shadow_header(cf, crc);
-        cio_file_st_set_content_len(cf->map, (uint32_t) cf->data_size);
-        write_checksum(cf, crc);
+        write_checksum_header(cf);
     }
     else {
         /* Persist the logical length after appends, truncation or rollback. */
